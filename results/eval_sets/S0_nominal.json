@@ -1,0 +1,134 @@
+{
+ "name": "S0_nominal",
+ "meta": {
+  "purpose": "nominal mission"
+ },
+ "n": 1,
+ "dispersion_spec": {
+  "ic_alt_m": {
+   "group": "ic",
+   "mean": 0.0,
+   "sigma": 5000.0,
+   "clip_lo": -15000.0,
+   "clip_hi": 15000.0
+  },
+  "ic_lat_deg": {
+   "group": "ic",
+   "mean": 0.0,
+   "sigma": 1.0,
+   "clip_lo": -3.0,
+   "clip_hi": 3.0
+  },
+  "ic_lon_deg": {
+   "group": "ic",
+   "mean": 0.0,
+   "sigma": 1.0,
+   "clip_lo": -3.0,
+   "clip_hi": 3.0
+  },
+  "ic_V_mps": {
+   "group": "ic",
+   "mean": 0.0,
+   "sigma": 60.0,
+   "clip_lo": -200.0,
+   "clip_hi": 200.0
+  },
+  "ic_fpa_deg": {
+   "group": "ic",
+   "mean": 0.0,
+   "sigma": 0.25,
+   "clip_lo": -0.75,
+   "clip_hi": 0.75
+  },
+  "ic_psi_deg": {
+   "group": "ic",
+   "mean": 0.0,
+   "sigma": 1.0,
+   "clip_lo": -3.0,
+   "clip_hi": 3.0
+  },
+  "tc_alt_m": {
+   "group": "tc",
+   "mean": 0.0,
+   "sigma": 2000.0,
+   "clip_lo": -5000.0,
+   "clip_hi": 5000.0
+  },
+  "tc_lat_deg": {
+   "group": "tc",
+   "mean": 0.0,
+   "sigma": 1.0,
+   "clip_lo": -3.0,
+   "clip_hi": 3.0
+  },
+  "tc_lon_deg": {
+   "group": "tc",
+   "mean": 0.0,
+   "sigma": 1.0,
+   "clip_lo": -3.0,
+   "clip_hi": 3.0
+  },
+  "tc_fpa_deg": {
+   "group": "tc",
+   "mean": 0.0,
+   "sigma": 0.5,
+   "clip_lo": -1.5,
+   "clip_hi": 1.5
+  },
+  "tc_psi_deg": {
+   "group": "tc",
+   "mean": 0.0,
+   "sigma": 0.5,
+   "clip_lo": -1.5,
+   "clip_hi": 1.5
+  },
+  "k_mass": {
+   "group": "models",
+   "mean": 1.0,
+   "sigma": 0.05,
+   "clip_lo": 0.85,
+   "clip_hi": 1.15
+  },
+  "k_CD": {
+   "group": "models",
+   "mean": 1.0,
+   "sigma": 0.2,
+   "clip_lo": 0.5,
+   "clip_hi": 1.5
+  },
+  "k_CL": {
+   "group": "models",
+   "mean": 1.0,
+   "sigma": 0.2,
+   "clip_lo": 0.5,
+   "clip_hi": 1.5
+  },
+  "k_rho": {
+   "group": "models",
+   "mean": 1.0,
+   "sigma": 0.25,
+   "clip_lo": 0.4,
+   "clip_hi": 1.6
+  }
+ },
+ "scenarios": [
+  {
+   "id": 0,
+   "ic_alt_m": 0.0,
+   "ic_lat_deg": 0.0,
+   "ic_lon_deg": 0.0,
+   "ic_V_mps": 0.0,
+   "ic_fpa_deg": 0.0,
+   "ic_psi_deg": 0.0,
+   "tc_alt_m": 0.0,
+   "tc_lat_deg": 0.0,
+   "tc_lon_deg": 0.0,
+   "tc_fpa_deg": 0.0,
+   "tc_psi_deg": 0.0,
+   "k_mass": 1.0,
+   "k_CL": 1.0,
+   "k_CD": 1.0,
+   "k_rho": 1.0
+  }
+ ]
+}
