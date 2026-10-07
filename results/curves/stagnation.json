@@ -1,0 +1,38 @@
+[
+ {
+  "run": "v20b",
+  "steps": 1015808,
+  "return_slope_per_M": -141.68523973034215,
+  "return_last_half_mean": -868.6,
+  "return_prev_half_mean": -759.625,
+  "log10_d_slope_per_M": 0.3709551971026351,
+  "best_score": 308.5876008679893,
+  "best_step": 600000,
+  "steps_since_best": 400000,
+  "last_d_km": 339.6467337716985
+ },
+ {
+  "run": "v20c",
+  "steps": 2031616,
+  "return_slope_per_M": -294.1254646547379,
+  "return_last_half_mean": -572.4666666666667,
+  "return_prev_half_mean": -393.0,
+  "log10_d_slope_per_M": 0.2507261605228449,
+  "best_score": 76.3118701484392,
+  "best_step": 900000,
+  "steps_since_best": 1100000,
+  "last_d_km": 80.63518890061206
+ },
+ {
+  "run": "v20d",
+  "steps": 8552448,
+  "return_slope_per_M": -0.08613832535287115,
+  "return_last_half_mean": -695.0666666666667,
+  "return_prev_half_mean": -694.6875,
+  "log10_d_slope_per_M": 0.002489393092428309,
+  "best_score": 90.3920588456109,
+  "best_step": 100000,
+  "steps_since_best": 8400000,
+  "last_d_km": 540.3129428052928
+ }
+]
