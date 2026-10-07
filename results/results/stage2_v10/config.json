@@ -1,0 +1,34 @@
+{
+  "stage": "stage2",
+  "timesteps": 10000000,
+  "n_envs": 8,
+  "n_substeps": 3,
+  "subproc": true,
+  "seed": 0,
+  "j_ref": 1071990730.0,
+  "lr_decay": true,
+  "hpo_best": "F:/reentry_RL/results/hpo_stage1_run1/best.json",
+  "lr_base": 0.00022196382297907764,
+  "ppo": {
+    "learning_rate": "schedule",
+    "n_steps": 1024,
+    "batch_size": 256,
+    "n_epochs": 5,
+    "gamma": 0.9999,
+    "gae_lambda": 0.962252540075988,
+    "clip_range": 0.27400242964936383,
+    "ent_coef": 0.017857890669823365,
+    "vf_coef": 0.5,
+    "max_grad_norm": 0.5
+  },
+  "net_arch": [
+    512,
+    512
+  ],
+  "reward_weights": {
+    "w_pos": 100.0,
+    "w_succ": 100.0,
+    "w_fail": 50.0,
+    "w_smooth": 0.2
+  }
+}

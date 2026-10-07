@@ -1,0 +1,12 @@
+stage1 eval (deterministic)
+  outcome        : reached
+  is_success     : False
+  t_final [s]    : 1589.0
+  alt [km]       : 24.988
+  landing err km : 249.57
+  fpa err [deg]  : 0.46
+  psi err [deg]  : 46.01
+  J_heat [J/m^2] : 1.1127e+09
+  J_ref  [J/m^2] : 1.0832e+09
+  J_heat / J_ref : 1.0273
+  episode reward : -122.78

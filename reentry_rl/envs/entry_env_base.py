@@ -1,0 +1,294 @@
+"""Shared 3-DOF re-entry environment (Gymnasium).
+
+Wraps the validated physics core. The agent commands attitude *rates* (DESIGN
+decision 2), which are integrated in-env over a fixed Δt with RK4 sub-stepping.
+The augmented integration state is
+
+    z = [r_nd, lon, lat, V_nd, gamma, psi, sigma, (alpha)]
+
+with sigma always a state (driven by the bank-rate action) and alpha a state
+only when `optimize_aoa` (Stage 2+); otherwise alpha follows the WB001 schedule.
+
+Subclasses set `optimize_aoa` and `n_actions` and may extend the observation.
+"""
+import numpy as np
+import gymnasium as gym
+from gymnasium import spaces
+
+from ..physics import constants as C
+from ..physics.atmosphere import atmosphere
+from ..physics.geodesy import (altitude_m, r_nd_from_alt,
+                               great_circle_distance_m, bearing_rad)
+from ..physics.aero_wb001 import nominal_aoa_deg, cl_cd, path_quantities
+from ..physics.eom_3dof import translational_rhs
+from .rewards import RewardWeights, path_barrier, position_penalty
+
+_DEG = np.pi / 180.0
+
+
+def _wrap_pi(a):
+    return (a + np.pi) % (2.0 * np.pi) - np.pi
+
+
+class EntryEnvBase(gym.Env):
+    metadata = {"render_modes": []}
+
+    optimize_aoa = False          # overridden by Stage 2
+    n_actions = 1                 # overridden per stage
+
+    def __init__(self, weights: RewardWeights = None, dt=1.0, n_substeps=3,
+                 max_steps=2500, j_ref=None, seed=None, log_range_obs=True):
+        super().__init__()
+        self.w = weights if weights is not None else RewardWeights()
+        self.dt = float(dt)
+        self.n_substeps = int(n_substeps)
+        self.max_steps = int(max_steps)
+        self.log_range_obs = bool(log_range_obs)   # 14th obs feature (added at v15);
+                                                   # set False to roll out pre-v15 models
+        self.J_ref = float(j_ref) if j_ref is not None else C.J_REF_BANK_ONLY
+
+        self.action_space = spaces.Box(-1.0, 1.0, shape=(self.n_actions,), dtype=np.float32)
+        self.observation_space = spaces.Box(-np.inf, np.inf, shape=(self._obs_dim(),),
+                                            dtype=np.float32)
+
+        self.tgt_lat = C.TARGET["lat_deg"] * _DEG
+        self.tgt_lon = C.TARGET["lon_deg"] * _DEG
+        self.tgt_alt = C.TARGET["alt_m"]
+        self.range0 = float(great_circle_distance_m(
+            C.IC["lat_deg"] * _DEG, C.IC["lon_deg"] * _DEG, self.tgt_lat, self.tgt_lon))
+
+        self._rng = np.random.default_rng(seed)
+        self._z = None
+        self._c = None
+
+    # -- to be specialized -------------------------------------------------
+    def _obs_dim(self):
+        return 12 + (1 if self.log_range_obs else 0) + (1 if self.optimize_aoa else 0)
+
+    def _n_state(self):
+        return 7 + (1 if self.optimize_aoa else 0)
+
+    # -- alpha resolution --------------------------------------------------
+    def _alpha_deg(self, z=None):
+        z = self._z if z is None else z
+        if self.optimize_aoa:
+            return float(np.rad2deg(z[7]))
+        return float(nominal_aoa_deg(z[3] * C.V_SCALE))
+
+    # -- dynamics ----------------------------------------------------------
+    def _deriv(self, z, sdot, adot):
+        alpha_deg = np.rad2deg(z[7]) if self.optimize_aoa else nominal_aoa_deg(z[3] * C.V_SCALE)
+        d6 = translational_rhs(z[0], z[1], z[2], z[3], z[4], z[5], z[6], alpha_deg)
+        dz = np.zeros_like(z)
+        dz[0:6] = d6
+        dz[6] = sdot
+        if self.optimize_aoa:
+            dz[7] = adot
+        return dz
+
+    def _integrate(self, sdot, adot):
+        z = self._z
+        h = self.dt / self.n_substeps
+        for _ in range(self.n_substeps):
+            k1 = self._deriv(z, sdot, adot)
+            k2 = self._deriv(z + 0.5 * h * k1, sdot, adot)
+            k3 = self._deriv(z + 0.5 * h * k2, sdot, adot)
+            k4 = self._deriv(z + h * k3, sdot, adot)
+            z = z + (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+            z[6] = np.clip(z[6], C.BANK_MIN, C.BANK_MAX)
+            if self.optimize_aoa:
+                z[7] = np.clip(z[7], C.ALPHA_MIN * _DEG, C.ALPHA_MAX * _DEG)
+        self._z = z
+
+    # -- derived quantities cache -----------------------------------------
+    def _update_cache(self):
+        z = self._z
+        alt = altitude_m(z[0], z[2])
+        Vmps = z[3] * C.V_SCALE
+        rho, _T, a_snd, _d = atmosphere(alt)
+        CL, CD = cl_cd(self._alpha_deg(z))
+        Lnd = C.KFORCE * rho * z[3] ** 2 * CL
+        Dnd = C.KFORCE * rho * z[3] ** 2 * CD
+        Qdot, qbar, n = path_quantities(rho, Vmps, Lnd, Dnd)
+        self._c = dict(alt=alt, Vmps=Vmps, a=a_snd, Qdot=Qdot, qbar=qbar, n=n)
+
+    def _range_to_go(self):
+        z = self._z
+        return float(great_circle_distance_m(z[2], z[1], self.tgt_lat, self.tgt_lon))
+
+    def _heading_error(self):
+        z = self._z
+        brg = bearing_rad(z[2], z[1], self.tgt_lat, self.tgt_lon)
+        return float(_wrap_pi(brg - z[5]))
+
+    def _landing_error_km(self):
+        return self._range_to_go() / 1000.0
+
+    # -- Gymnasium API -----------------------------------------------------
+    def reset(self, *, seed=None, options=None):
+        super().reset(seed=seed)
+        if seed is not None:
+            self._rng = np.random.default_rng(seed)
+        ic = C.IC
+        lat0 = ic["lat_deg"] * _DEG
+        z = np.zeros(self._n_state(), dtype=float)
+        z[0] = r_nd_from_alt(ic["alt_m"], lat0)
+        z[1] = ic["lon_deg"] * _DEG
+        z[2] = lat0
+        z[3] = ic["V_mps"] / C.V_SCALE
+        z[4] = ic["fpa_deg"] * _DEG
+        z[5] = ic["heading_deg"] * _DEG
+        z[6] = 0.0                                   # initial bank
+        if self.optimize_aoa:
+            z[7] = nominal_aoa_deg(ic["V_mps"]) * _DEG
+        self._z = z
+        self.t = 0.0
+        self.steps = 0
+        self.J = 0.0
+        self._update_cache()
+        self._prev_qdot = self._c["Qdot"]
+        self._prev_d_km = self._range_to_go() / 1000.0
+        self._prev_action = np.zeros(self.n_actions)
+        self._chatter = 0.0
+        return self._obs(), self._info()
+
+    def step(self, action):
+        a = np.asarray(action, dtype=np.float64).reshape(-1)
+        sdot = float(np.clip(a[0], -1.0, 1.0)) * C.SIGMA_DOT_MAX
+        adot = (float(np.clip(a[1], -1.0, 1.0)) * C.ALPHA_DOT_MAX) if self.optimize_aoa else 0.0
+
+        self._integrate(sdot, adot)
+        self.t += self.dt
+        self.steps += 1
+        self._update_cache()
+
+        # heat-load increment over the step (trapezoid on Qdot)
+        dJ = 0.5 * (self._prev_qdot + self._c["Qdot"]) * self.dt
+        self.J += dJ
+        self._prev_qdot = self._c["Qdot"]
+
+        reward, terminated, truncated, tinfo = self._reward(dJ, a)
+        info = self._info()
+        info.update(tinfo)
+        return self._obs(), float(reward), bool(terminated), bool(truncated), info
+
+    # -- reward / termination ---------------------------------------------
+    def _reward(self, dJ, action):
+        w, z, c = self.w, self._z, self._c
+
+        # dense potential-based shaping on the LOG position penalty: distributes the
+        # terminal position objective over the episode for credit assignment (telescopes
+        # to -log_pen(d_final), so only the END position matters). This is what drives
+        # the policy to CLOSE — the no-dense 2M run stalled at 400-700 km without it.
+        cur_d_km = self._range_to_go() / 1000.0
+        r = position_penalty(self._prev_d_km, w) - position_penalty(cur_d_km, w)
+        self._prev_d_km = cur_d_km
+
+        # chattering: ACCUMULATE action change; charged once at the end as the
+        # episode mean (a per-step sum taxes long glides by episode length x
+        # exploration noise and made short dives out-score them — see rewards.py)
+        da2 = float(np.sum(np.square(action - self._prev_action)))
+        self._chatter += da2
+        self._prev_action = np.asarray(action, dtype=float).copy()
+
+        # end-game burst guard: per-step, only at low altitude (bounded phase, so
+        # no episode-length tax; altitude-gated so trajectory shape can't dodge
+        # it) — prices the terminal bang-bang trim directly
+        if c["alt"] < w.endsmooth_alt_m:
+            r -= w.w_endsmooth * da2
+
+        # path constraints: capped soft barrier (zero when feasible)
+        bar = float(path_barrier(c["Qdot"] / C.QDOT_MAX, w.path_soft)
+                    + path_barrier(c["qbar"] / C.QBAR_MAX, w.path_soft)
+                    + path_barrier(c["n"] / C.N_MAX, w.path_soft))
+        r -= w.w_path * min(bar, w.path_cap)
+
+        terminated = truncated = False
+        tinfo = {}
+        alt = c["alt"]
+        bad = (not np.isfinite(alt)) or (alt > C.ALT_MAX) or (c["Vmps"] < C.V_MIN) \
+            or (abs(z[4]) > 89.0 * _DEG)
+
+        # Terminal anchor -w_pos*log10(d_end) is charged on EVERY ending below.
+        # v7 charged it only on landing -> skip-out dodged it (learned to bail out);
+        # v8 dropped it entirely -> dive-and-land-far (discounting favors ending
+        # the episode early). Uniform anchor kills both attractors: the return is
+        # monotone in final distance AND far endings are expensive for all outcomes.
+        if bad:
+            terminated = True
+            r -= w.w_fail + position_penalty(cur_d_km, w)
+            tinfo = {"outcome": "fail", "is_success": False}
+        elif alt <= self.tgt_alt:
+            terminated = True
+            d_km = self._landing_error_km()
+            success = (d_km <= 1.0)
+            # anchor always applies; the landing bonus is CONCAVE (1-(d/ramp)^2)^+
+            # — dense gradient from succ_ramp_km in AND anti-dispersion (Jensen),
+            # reinforcing the concave near-field well that drives sigma down (v18)
+            ramp = max(0.0, 1.0 - (d_km / w.succ_ramp_km) ** 2)
+            r += -position_penalty(d_km, w) + w.w_succ * ramp
+            tinfo = {"outcome": "reached", "is_success": bool(success),
+                     "d_km": d_km,
+                     "fpa_err_deg": abs(np.rad2deg(z[4]) - C.TARGET["fpa_deg"]),
+                     "psi_err_deg": abs(np.rad2deg(_wrap_pi(z[5] - self.tgt_psi))),
+                     "J_heat": self.J, "tf_s": self.t}
+        elif self.steps >= self.max_steps:
+            truncated = True
+            r -= w.w_fail + position_penalty(cur_d_km, w)
+            tinfo = {"outcome": "timeout", "is_success": False}
+
+        if terminated or truncated:            # chatter charged uniformly on every ending
+            chatter_mean = self._chatter / max(self.steps, 1)
+            r -= w.w_smooth * chatter_mean
+            tinfo["chatter_mean"] = chatter_mean
+
+        return r, terminated, truncated, tinfo
+
+    @property
+    def tgt_psi(self):
+        return C.TARGET["heading_deg"] * _DEG
+
+    # -- observation -------------------------------------------------------
+    def _obs(self):
+        z, c = self._z, self._c
+        feats = [
+            c["alt"] / 100e3,                       # altitude (~1 -> 0.25)
+            c["Vmps"] / 7450.0,                     # velocity  (phase variable)
+            z[4] / (20.0 * _DEG),                   # FPA
+            np.sin(z[5]), np.cos(z[5]),             # heading (wrap-safe)
+            z[6] / C.BANK_MAX,                      # current bank state [-1,1]
+            c["qbar"] / C.QBAR_MAX,
+            (c["Vmps"] / max(c["a"], 1e-6)) / 25.0,  # Mach
+            c["Qdot"] / C.QDOT_MAX,
+            c["n"] / C.N_MAX,
+            self._range_to_go() / self.range0,      # range-to-go (1 -> 0)
+            self._heading_error() / np.pi,          # heading error [-1,1]
+        ]
+        if self.optimize_aoa:
+            feats.append(np.rad2deg(z[7]) / 40.0)
+        # log-range: per-decade resolution down to ~100 m, matching the log reward.
+        # The linear range fraction above is ~1e-4 at single-km scale — invisible to
+        # the nets — which capped the reward-only campaign at ~5 km (v14 post-mortem).
+        # Kept LAST so older policies map onto a zero-padded input column.
+        if self.log_range_obs:
+            feats.append(np.log10(max(self._range_to_go() / 1000.0, 0.1)) / 4.0)
+        return np.asarray(feats, dtype=np.float32)
+
+    # -- info (cheap; full physical state for logging / CSV export) --------
+    def _info(self):
+        z, c = self._z, self._c
+        return {
+            "t_s": self.t,
+            "alt_km": c["alt"] / 1e3,
+            "lon_deg": float(np.rad2deg(z[1])),
+            "lat_deg": float(np.rad2deg(z[2])),
+            "V_mps": c["Vmps"],
+            "gamma_deg": float(np.rad2deg(z[4])),
+            "psi_deg": float(np.rad2deg(z[5])),
+            "sigma_deg": float(np.rad2deg(z[6])),
+            "alpha_deg": self._alpha_deg(z),
+            "Qdot_Wm2": c["Qdot"],
+            "qbar_Pa": c["qbar"],
+            "n_g": c["n"],
+            "J_heat": self.J,
+        }

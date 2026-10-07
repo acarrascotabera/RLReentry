@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.ipynb_checkpoints/
+
+# Local tool settings
+.claude/
+
+# LaTeX build products (sources, figures and main.pdf are tracked)
+report/*.aux
+report/*.log
+report/*.out
+report/*.bbl
+report/*.blg
+report/*.toc
+report/*.synctex.gz
+report/*.fdb_latexmk
+report/*.fls
+
+# Training artefacts. Models (.zip), normalizers (.pkl), checkpoints,
+# TensorBoard logs and raw trajectories are too large for git (~4 GB) and
+# stay on disk only. Tracked: run configs, summaries, the run log, the
+# Optuna study and the Monte Carlo evaluation tables.
+results/**
+!results/**/
+!results/**/*.json
+!results/**/*.md
+!results/**/eval_summary.txt
+!results/**/evaluations.npz
+!results/**/study.db
+!results/**/eval/**
+results/**/eval/**/*.png
+results/**/eval/**/*.svg

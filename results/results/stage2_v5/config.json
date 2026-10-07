@@ -1,0 +1,49 @@
+{
+  "stage": "stage2",
+  "timesteps": 4000000,
+  "n_envs": 8,
+  "n_substeps": 3,
+  "subproc": true,
+  "seed": 0,
+  "j_ref": 1071990730.0,
+  "lr_decay": true,
+  "hpo_best": "E:/reentry_RL/results/hpo_stage1_run1/best.json",
+  "lr_base": 0.00022196382297907764,
+  "ppo": {
+    "learning_rate": "schedule",
+    "n_steps": 1024,
+    "batch_size": 256,
+    "n_epochs": 5,
+    "gamma": 0.9989133132740753,
+    "gae_lambda": 0.962252540075988,
+    "clip_range": 0.27400242964936383,
+    "ent_coef": 0.005,
+    "vf_coef": 0.5,
+    "max_grad_norm": 0.5
+  },
+  "net_arch": [
+    512,
+    512
+  ],
+  "reward_weights": {
+    "w_heat": 0.02,
+    "w_path": 3.6464405117819743,
+    "w_act": 0.05,
+    "w_smooth": 0.3815198568394041,
+    "w_aoa_rate": 0.0,
+    "w_aoa_lo": 1.0,
+    "aoa_floor_deg": 20.0,
+    "path_soft": 0.9,
+    "w_pos": 250.0,
+    "w_succ": 100.0,
+    "w_fail": 50.0,
+    "w_fpa": 4.0,
+    "w_psi": 8.628364561956555,
+    "w_progress": 1.0,
+    "w_far": 1.1582272396469033,
+    "pos_pen_cap": 1000000000.0,
+    "succ_decay_km": 0.5,
+    "fpa_tol_deg": 5.0,
+    "psi_tol_deg": 15.0
+  }
+}

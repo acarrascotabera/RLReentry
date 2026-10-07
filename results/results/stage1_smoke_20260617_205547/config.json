@@ -1,0 +1,37 @@
+{
+  "timesteps": 50000,
+  "n_envs": 4,
+  "seed": 0,
+  "train_seconds": 447.7,
+  "ppo": {
+    "learning_rate": 0.0003,
+    "n_steps": 1024,
+    "batch_size": 256,
+    "n_epochs": 10,
+    "gamma": 0.999,
+    "gae_lambda": 0.95,
+    "clip_range": 0.2,
+    "ent_coef": 0.0
+  },
+  "net_arch": [
+    128,
+    128
+  ],
+  "reward_weights": {
+    "w_heat": 1.0,
+    "w_path": 1.0,
+    "w_act": 0.01,
+    "path_soft": 0.9,
+    "w_succ": 10.0,
+    "w_pos": 1.0,
+    "succ_decay_km": 0.5,
+    "exp_beta": 0.2222222222222222,
+    "pos_pen_cap": 100.0,
+    "w_fpa": 1.0,
+    "w_psi": 1.0,
+    "fpa_tol_deg": 5.0,
+    "psi_tol_deg": 15.0,
+    "w_fail": 50.0,
+    "w_progress": 0.0
+  }
+}

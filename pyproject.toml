@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "reentry_rl"
+version = "0.0.1"
+description = "RL guidance & control for WB001 re-entry, validated against the MATLAB SCP framework"
+readme = "DESIGN.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "pandas",
+    "matplotlib",
+    "gymnasium>=0.29",
+    "stable-baselines3>=2.3",
+    "optuna>=3.5",
+]
+
+# Optional install for clean imports from anywhere (notebooks, IDE):
+#     pip install -e .
+# Not required — the entry scripts bootstrap sys.path so they also run directly.
+
+[tool.setuptools.packages.find]
+include = ["reentry_rl*"]

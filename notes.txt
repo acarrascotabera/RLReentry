@@ -1,0 +1,14 @@
+I want you to devise the complete code architecture for a re-entry guidance and control reinforcement learning architecture, including the non-linear simulator where it can be trained and tested. 
+
+The validation of the complete architecture will be compared to the existing re-entry guidance and control architecture under ..\Code\reentry_simulator for the wb001 mission. You can use all the values for the initial and final constraints of the mission, the path constraints, the vehicle definition (MCI, aerodynamics, actuators, ...) inside this folder, as well as the environment and propagator model used for the atmosphere, gravity, Earth shape and the corridor constraints formulation. Focus on the heat load minimization mission exclusively.
+
+For this, I want you to consider the following:
+- Follow a typical RL synthesis approach in which you perform the hyperparameter optimization, the reward design, training, etc...
+- Consider a cascaded approach:
+	- Firstly, I want you just to consider the generation of commands for the bank angle, so just one variable in the action space that is commanded by the RL implementation.
+	- Secondly, I want you to consider generation of commands for the bank angle and angle of attack, so that just two variables in the action space are commanded by the RL implementation. In these first two implementations, the final time is set free. This approach is in essence similar to the convex optimization based-guidance system of the reference framework that I provide you, in which the attitude commands are assummed to be tracked instantaneuosly. 
+	- Thirdly, I want you to consider the generation of commands for the bank angle and angle of attack, but also the required torque by the RCS and the aerodynamic surface deflection, for all of the axes. In this case, the action space used by the RL implementation would handle both the convex optimization-based guidance system generation of commands and the attitude control system.
+This cascaded approach should be helpful in terms of the reward design. I could guess that if a reward works for the command generation of the bank angle, it should as well work for the angle of attack, but this is something we need to investigate.
+- You can use Optuna for the hypeparameter optimization and StableBaselines3 for the RL environment, as well as Gymnasium.
+
+Are there any other pending questions you have to define the overall architecture?

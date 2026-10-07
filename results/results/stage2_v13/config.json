@@ -1,0 +1,41 @@
+{
+  "stage": "stage2",
+  "timesteps": 10000000,
+  "n_envs": 8,
+  "n_substeps": 3,
+  "subproc": true,
+  "seed": 0,
+  "j_ref": 1071990730.0,
+  "lr_decay": true,
+  "hpo_best": null,
+  "lr_base": 0.0001,
+  "init_model": "F:/reentry_RL/results/stage2_v12/best/best_model.zip",
+  "init_vn": "F:/reentry_RL/results/stage2_v12/ckpt/ppo_vecnormalize_250000_steps.pkl",
+  "ppo": {
+    "learning_rate": "schedule",
+    "n_steps": 2048,
+    "batch_size": 512,
+    "n_epochs": 10,
+    "gamma": 0.999,
+    "gae_lambda": 0.95,
+    "clip_range": 0.15,
+    "ent_coef": 0.001,
+    "vf_coef": 0.5,
+    "max_grad_norm": 0.5
+  },
+  "net_arch": [
+    256,
+    256
+  ],
+  "reward_weights": {
+    "w_pos": 100.0,
+    "w_near": 300.0,
+    "d_near_km": 50.0,
+    "w_succ": 100.0,
+    "w_fail": 50.0,
+    "w_smooth": 25.0,
+    "w_path": 1.0,
+    "path_soft": 0.9,
+    "path_cap": 3.0
+  }
+}

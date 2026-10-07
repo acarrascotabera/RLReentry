@@ -1,0 +1,12 @@
+Stage-1 smoke eval (deterministic)
+  outcome        : reached
+  is_success     : False
+  t_final [s]    : 1472.0
+  alt [km]       : 24.928
+  landing err km : 143.79
+  fpa err [deg]  : 4.03
+  psi err [deg]  : 14.38
+  J_heat [J/m^2] : 1.0986e+09
+  J_ref  [J/m^2] : 1.0832e+09
+  J_heat / J_ref : 1.0142
+  episode reward : -5829.51
