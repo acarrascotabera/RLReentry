@@ -77,6 +77,8 @@ def parse_args():
     ap.add_argument("--curriculum-pass-frac", type=float, default=0.75)
     ap.add_argument("--legacy-terminal", action="store_true",
                     help="terminal state at the first step below 25 km instead of the exact crossing")
+    ap.add_argument("--legacy-integrator", action="store_true",
+                    help="attitude bounds only after each RK4 substep (pre-2026-10 dynamics)")
     ap.add_argument("--ckpt-freq", type=int, default=250_000, help="total env steps between checkpoints")
     ap.add_argument("--outdir", default=None)
     # reward-weight overrides (the main tuning knobs)
@@ -124,7 +126,8 @@ def main():
 
     env_cls = ENV_CLASSES[args.stage]
     j_ref = J_REF[args.stage]
-    env_kwargs = {"exact_terminal": not args.legacy_terminal}
+    env_kwargs = {"exact_terminal": not args.legacy_terminal,
+                  "rate_saturation": not args.legacy_integrator}
     if args.obs_version:
         env_kwargs["obs_version"] = args.obs_version
 

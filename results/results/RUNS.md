@@ -551,3 +551,39 @@ Command: `train_sb3 --stage stage2 --timesteps 10000000 --n-envs 8
 --init-vn results/stage2_v13/expanded/vecnormalize_expanded.pkl
 --lr 1e-4 --lr-decay --clip-range 0.15 --ent-coef 0.0 --action-std 0.2
 --seed 0 --outdir results/stage2_v16`
+
+## Evaluation-harness era (2026-10): re-measuring the campaign
+
+Branch `point1-evaluation-harness`. Three measurement/physics issues found while
+building a fixed, dispersion-aware evaluation protocol. Numbers below are
+deterministic rollouts of the HPO-best policy `trial023_0.27km_300k.zip`.
+
+| change | nominal d_km | max path ratio | note |
+|---|---|---|---|
+| as reported (July) | 0.273 | 0.952 | first 1 s step below 25 km, bounds after each RK4 substep |
+| exact 25 km crossing | 0.418 | 0.952 | crossing located inside the substep (`exact_terminal`) |
+| + saturated attitude integrator | **259.4** | **2.02** | `rate_saturation`: AoA/bank bounded inside every RK4 stage |
+
+1. **Terminal measurement.** The handover state was read at the first step
+   below 25 km. At V_f ~ 300 m/s one step is ~0.3 km of travel, the size of the
+   result. Now located exactly (secant iteration inside the substep).
+2. **AoA bound leak (decisive).** alpha <= 40 deg was enforced only after each
+   RK4 substep, so the stages evaluated the aero at alpha + c*h*alpha_dot, up to
+   5 deg beyond the limit. The whole v10 -> v16 -> HPO lineage commands
+   alpha_dot = +3..+10 deg/s (raw action +0.22..+0.64) into the limit: the
+   "AoA railed at 40 deg" was a hidden AoA modulation at ~40.5-41.6 deg
+   effective. With the bound enforced inside the stages the HPO-best policy
+   lands 259 km off and violates q-bar/n (ratio 2.02); v16-best goes 5.5 -> 317 km.
+   The reward-design lessons of v1-v19 are unaffected (they are about reward
+   structure), but every terminal-accuracy number of the campaign was obtained
+   with AoA authority beyond the vehicle envelope and the SCvx bounds, and must
+   be regenerated.
+3. **Open-loop behaviour.** Even with the legacy dynamics the HPO-best policy is
+   not robust: on the realistic one-at-a-time sweep (0.1x VISTA sigma, +-3 sigma)
+   the median miss is 11.3 km (max 389 km, 21 % within 1 km); at VISTA scale the
+   median is 115 km (max 3,542 km, 74 % feasible). Terminal angles are
+   dfpa ~ -15 deg, dpsi ~ -70 deg in every case (never rewarded).
+   Results: `results/baseline_eval/hpo_trial023/eval_legacy_integrator/`.
+
+Legacy behaviour stays reproducible: `--legacy-terminal --legacy-integrator`
+(train_sb3, hpo_optuna, evaluate_policy) gives 0.2728 km again.

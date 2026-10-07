@@ -21,6 +21,13 @@ terminal state is re-integrated to it. Without it, the terminal state is the
 first 1 s step below the target altitude — at the ~300 m/s handover speed
 that is up to ~0.3 km of horizontal travel, the same order as the best
 landing errors, so legacy numbers carry that measurement quantization.
+
+With `rate_saturation` (default) bank and AoA behave as saturated integrators
+inside every RK4 stage. Without it (legacy) the bounds were applied only after
+each substep, so the stages evaluated the aero at up to h*15 deg/s = 5 deg
+beyond ALPHA_MAX: the v10-HPO policies commanded +3..+10 deg/s into the 40 deg
+limit and flew an effective AoA of ~40.5-41.6 deg (HPO-best: 0.42 km legacy,
+259 km and q-bar/n ratio 2.0 with the bound enforced).
 """
 from dataclasses import replace
 

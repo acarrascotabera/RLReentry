@@ -301,11 +301,14 @@ def main():
     ap.add_argument("--workers", type=int, default=None)
     ap.add_argument("--legacy-terminal", action="store_true",
                     help="measure at the first step below 25 km (pre-2026-10 behaviour)")
+    ap.add_argument("--legacy-integrator", action="store_true",
+                    help="attitude bounds only after each RK4 substep (pre-2026-10 behaviour)")
     args = ap.parse_args()
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    env_kwargs = {"exact_terminal": not args.legacy_terminal}
+    env_kwargs = {"exact_terminal": not args.legacy_terminal,
+                  "rate_saturation": not args.legacy_integrator}
     for set_ref in args.sets:
         path = resolve_set(set_ref)
         name, scen, labels = load_set(path)
@@ -316,6 +319,7 @@ def main():
         summ = {"set": name, "set_file": str(path.relative_to(REPO_ROOT)) if path.is_relative_to(REPO_ROOT) else str(path),
                 "model": str(args.model), "vn": str(args.vn), "stage": args.stage,
                 "exact_terminal": not args.legacy_terminal,
+                "rate_saturation": not args.legacy_integrator,
                 "wall_s": round(time.time() - t0, 1), **summarize(df)}
         (outdir / f"{name}_summary.json").write_text(json.dumps(summ, indent=1))
         if "param" in df.columns:
