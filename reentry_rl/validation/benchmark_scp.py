@@ -6,6 +6,7 @@ Handles BOTH CSV layouts:
   - bank_free_time     :  9 columns (no alpha) -> alpha reconstructed from the
                           WB001 nominal schedule, uAlpha set to 0
 """
+import os
 import re
 from pathlib import Path
 
@@ -14,8 +15,12 @@ import pandas as pd
 
 from ..physics.aero_wb001 import nominal_aoa_deg
 
+# Reference repo root: $REENTRY_REF_ROOT, else the first known location that exists.
+_REF_CANDIDATES = [Path(r"E:\Code\reentry_simulator"),
+                   Path.home() / "Documents" / "MSc thesis" / "Code" / "reentry_simulator"]
+REF_ROOT = Path(os.environ["REENTRY_REF_ROOT"]) if "REENTRY_REF_ROOT" in os.environ else \
+    next((p for p in _REF_CANDIDATES if p.exists()), _REF_CANDIDATES[0])
 # The two WB001 min-heatload benchmarks (relative to the reference repo root).
-REF_ROOT = Path(r"E:\Code\reentry_simulator")
 BENCHMARKS = {
     "bank_only": REF_ROOT / "results" / "guidance_unit_test" / "guidance_run_wb001_20260617_191855",
     "bank_aoa": REF_ROOT / "results" / "validation" / "guidance_run_wb001_min_heatload_bank_aoa_free_time",

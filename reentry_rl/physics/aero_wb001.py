@@ -6,11 +6,27 @@ Ports:
   - non-dim forces     : entry_aero_quantities_and_derivatives.m  (L_nd = K*rho*V_nd^2*CL)
   - path quantities    : guidance/physics/path_constraints_model.m
 """
+from typing import NamedTuple
+
 import numpy as np
 
 from .constants import KFORCE, KQ, HEAT_RATE_VEL_EXP, V_SCALE
 from .atmosphere import atmosphere
 from .geodesy import altitude_m
+
+
+class ModelFactors(NamedTuple):
+    """Multiplicative model dispersions (VISTA montecarlo/cases/g_models.m).
+
+    k_rho scales the atmospheric density, k_CL / k_CD the aerodynamic
+    coefficients and k_mass the vehicle mass (so the non-dim force factor
+    KFORCE ~ 1/m scales by 1/k_mass). `None` everywhere means nominal and
+    keeps the original code path bit-identical.
+    """
+    k_rho: float = 1.0
+    k_CL: float = 1.0
+    k_CD: float = 1.0
+    k_mass: float = 1.0
 
 # WB001 nominal-AoA schedule parameters (wb001_nominal_aoa.m)
 _AOA_SWITCH_MPS = 4570.0
@@ -41,16 +57,23 @@ def cl_cd(alpha_deg):
     return CL, CD
 
 
-def lift_drag_nd(r_nd, lat_rad, V_nd, alpha_deg):
+def lift_drag_nd(r_nd, lat_rad, V_nd, alpha_deg, model: ModelFactors = None):
     """Non-dim lift/drag accelerations (in g0 units) and the local density.
 
-    Returns (L_nd, D_nd, rho, CL, CD).
+    Returns (L_nd, D_nd, rho, CL, CD); with `model`, rho/CL/CD are the
+    dispersed values.
     """
     h = altitude_m(r_nd, lat_rad)
     rho, _T, _a, _drho = atmosphere(h)
     CL, CD = cl_cd(alpha_deg)
-    L_nd = KFORCE * rho * V_nd ** 2 * CL
-    D_nd = KFORCE * rho * V_nd ** 2 * CD
+    kforce = KFORCE
+    if model is not None:
+        rho = rho * model.k_rho
+        CL = CL * model.k_CL
+        CD = CD * model.k_CD
+        kforce = KFORCE / model.k_mass
+    L_nd = kforce * rho * V_nd ** 2 * CL
+    D_nd = kforce * rho * V_nd ** 2 * CD
     return L_nd, D_nd, rho, CL, CD
 
 

@@ -10,6 +10,17 @@ with sigma always a state (driven by the bank-rate action) and alpha a state
 only when `optimize_aoa` (Stage 2+); otherwise alpha follows the WB001 schedule.
 
 Subclasses set `optimize_aoa` and `n_actions` and may extend the observation.
+
+Each episode flies one `Scenario` (entry-state / target offsets and model
+factors, see scenario.py): passed as reset(options={"scenario": s}), drawn
+from `scenario_sampler(rng)`, or nominal by default.
+
+With `exact_terminal` (default) the episode ends exactly at the target-
+altitude crossing: the crossing is located inside the RK4 substep and the
+terminal state is re-integrated to it. Without it, the terminal state is the
+first 1 s step below the target altitude — at the ~300 m/s handover speed
+that is up to ~0.3 km of horizontal travel, the same order as the best
+landing errors, so legacy numbers carry that measurement quantization.
 """
 import numpy as np
 import gymnasium as gym
@@ -22,8 +33,15 @@ from ..physics.geodesy import (altitude_m, r_nd_from_alt,
 from ..physics.aero_wb001 import nominal_aoa_deg, cl_cd, path_quantities
 from ..physics.eom_3dof import translational_rhs
 from .rewards import RewardWeights, path_barrier, position_penalty
+from .scenario import Scenario, NOMINAL
 
 _DEG = np.pi / 180.0
+
+# Observation layouts. Older policies keep their own layout so they can still
+# be rolled out; new features are only ever APPENDED (see expand_obs.py).
+#   v13 : 12 base features (+ AoA in Stage 2)
+#   v15 : + log10 range-to-go (added at campaign v15)
+OBS_VERSIONS = ("v13", "v15")
 
 
 def _wrap_pi(a):
@@ -37,33 +55,43 @@ class EntryEnvBase(gym.Env):
     n_actions = 1                 # overridden per stage
 
     def __init__(self, weights: RewardWeights = None, dt=1.0, n_substeps=3,
-                 max_steps=2500, j_ref=None, seed=None, log_range_obs=True):
+                 max_steps=2500, j_ref=None, seed=None, log_range_obs=True,
+                 obs_version=None, exact_terminal=True, scenario_sampler=None):
         super().__init__()
         self.w = weights if weights is not None else RewardWeights()
         self.dt = float(dt)
         self.n_substeps = int(n_substeps)
         self.max_steps = int(max_steps)
-        self.log_range_obs = bool(log_range_obs)   # 14th obs feature (added at v15);
-                                                   # set False to roll out pre-v15 models
+        # log_range_obs is the legacy switch (False = pre-v15 13-feature layout)
+        self.obs_version = obs_version or ("v15" if log_range_obs else "v13")
+        if self.obs_version not in OBS_VERSIONS:
+            raise ValueError(f"obs_version must be one of {OBS_VERSIONS}")
+        self.exact_terminal = bool(exact_terminal)
+        self.scenario_sampler = scenario_sampler
         self.J_ref = float(j_ref) if j_ref is not None else C.J_REF_BANK_ONLY
 
         self.action_space = spaces.Box(-1.0, 1.0, shape=(self.n_actions,), dtype=np.float32)
         self.observation_space = spaces.Box(-np.inf, np.inf, shape=(self._obs_dim(),),
                                             dtype=np.float32)
 
-        self.tgt_lat = C.TARGET["lat_deg"] * _DEG
-        self.tgt_lon = C.TARGET["lon_deg"] * _DEG
-        self.tgt_alt = C.TARGET["alt_m"]
+        self._set_target(NOMINAL)
+        # observation normalizer: the NOMINAL mission range, kept fixed under
+        # dispersions so the range-fraction feature means the same for all scenarios
         self.range0 = float(great_circle_distance_m(
             C.IC["lat_deg"] * _DEG, C.IC["lon_deg"] * _DEG, self.tgt_lat, self.tgt_lon))
 
         self._rng = np.random.default_rng(seed)
+        self.scenario = NOMINAL
+        self._model = None
         self._z = None
         self._c = None
 
     # -- to be specialized -------------------------------------------------
     def _obs_dim(self):
-        return 12 + (1 if self.log_range_obs else 0) + (1 if self.optimize_aoa else 0)
+        n = 12 + (1 if self.optimize_aoa else 0)
+        if self.obs_version != "v13":
+            n += 1
+        return n
 
     def _n_state(self):
         return 7 + (1 if self.optimize_aoa else 0)
@@ -78,7 +106,7 @@ class EntryEnvBase(gym.Env):
     # -- dynamics ----------------------------------------------------------
     def _deriv(self, z, sdot, adot):
         alpha_deg = np.rad2deg(z[7]) if self.optimize_aoa else nominal_aoa_deg(z[3] * C.V_SCALE)
-        d6 = translational_rhs(z[0], z[1], z[2], z[3], z[4], z[5], z[6], alpha_deg)
+        d6 = translational_rhs(z[0], z[1], z[2], z[3], z[4], z[5], z[6], alpha_deg, self._model)
         dz = np.zeros_like(z)
         dz[0:6] = d6
         dz[6] = sdot
@@ -86,19 +114,51 @@ class EntryEnvBase(gym.Env):
             dz[7] = adot
         return dz
 
+    def _rk4(self, z, h, sdot, adot):
+        k1 = self._deriv(z, sdot, adot)
+        k2 = self._deriv(z + 0.5 * h * k1, sdot, adot)
+        k3 = self._deriv(z + 0.5 * h * k2, sdot, adot)
+        k4 = self._deriv(z + h * k3, sdot, adot)
+        z = z + (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+        z[6] = np.clip(z[6], C.BANK_MIN, C.BANK_MAX)
+        if self.optimize_aoa:
+            z[7] = np.clip(z[7], C.ALPHA_MIN * _DEG, C.ALPHA_MAX * _DEG)
+        return z
+
     def _integrate(self, sdot, adot):
+        """Advance one guidance interval. Returns the elapsed time, which is
+        shorter than dt when the target-altitude crossing ends the step."""
         z = self._z
         h = self.dt / self.n_substeps
-        for _ in range(self.n_substeps):
-            k1 = self._deriv(z, sdot, adot)
-            k2 = self._deriv(z + 0.5 * h * k1, sdot, adot)
-            k3 = self._deriv(z + 0.5 * h * k2, sdot, adot)
-            k4 = self._deriv(z + h * k3, sdot, adot)
-            z = z + (h / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
-            z[6] = np.clip(z[6], C.BANK_MIN, C.BANK_MAX)
-            if self.optimize_aoa:
-                z[7] = np.clip(z[7], C.ALPHA_MIN * _DEG, C.ALPHA_MAX * _DEG)
+        for k in range(self.n_substeps):
+            z_prev = z
+            z = self._rk4(z_prev, h, sdot, adot)
+            if self.exact_terminal and altitude_m(z[0], z[2]) <= self.tgt_alt:
+                tau = self._crossing_fraction(z_prev, z, h, sdot, adot)
+                self._z = self._rk4(z_prev, tau * h, sdot, adot)
+                self._crossed = True
+                return (k + tau) * h
         self._z = z
+        return self.dt
+
+    def _crossing_fraction(self, z0, z1, h, sdot, adot, iters=3):
+        """Fraction tau in (0, 1] of the substep at which altitude reaches the
+        target: secant iterations on alt(rk4(z0, tau*h)) - h_tgt. The altitude
+        is smooth and nearly linear over a 1/3 s substep, so 3 iterations
+        reach sub-millimetre accuracy."""
+        f0 = altitude_m(z0[0], z0[2]) - self.tgt_alt          # > 0
+        f1 = altitude_m(z1[0], z1[2]) - self.tgt_alt          # <= 0
+        t0, t1 = 0.0, 1.0
+        for _ in range(iters):
+            if f1 == f0:
+                break
+            t = float(np.clip(t1 - f1 * (t1 - t0) / (f1 - f0), 1e-9, 1.0))
+            zt = self._rk4(z0, t * h, sdot, adot)
+            ft = altitude_m(zt[0], zt[2]) - self.tgt_alt
+            t0, f0, t1, f1 = t1, f1, t, ft
+            if abs(ft) < 1e-4:
+                break
+        return t1
 
     # -- derived quantities cache -----------------------------------------
     def _update_cache(self):
@@ -107,8 +167,12 @@ class EntryEnvBase(gym.Env):
         Vmps = z[3] * C.V_SCALE
         rho, _T, a_snd, _d = atmosphere(alt)
         CL, CD = cl_cd(self._alpha_deg(z))
-        Lnd = C.KFORCE * rho * z[3] ** 2 * CL
-        Dnd = C.KFORCE * rho * z[3] ** 2 * CD
+        kforce = C.KFORCE
+        if self._model is not None:
+            m = self._model
+            rho, CL, CD, kforce = rho * m.k_rho, CL * m.k_CL, CD * m.k_CD, C.KFORCE / m.k_mass
+        Lnd = kforce * rho * z[3] ** 2 * CL
+        Dnd = kforce * rho * z[3] ** 2 * CD
         Qdot, qbar, n = path_quantities(rho, Vmps, Lnd, Dnd)
         self._c = dict(alt=alt, Vmps=Vmps, a=a_snd, Qdot=Qdot, qbar=qbar, n=n)
 
@@ -124,24 +188,44 @@ class EntryEnvBase(gym.Env):
     def _landing_error_km(self):
         return self._range_to_go() / 1000.0
 
+    # -- scenario ----------------------------------------------------------
+    def _set_target(self, sc: Scenario):
+        tg = C.TARGET
+        self.tgt_lat = (tg["lat_deg"] + sc.tc_lat_deg) * _DEG
+        self.tgt_lon = (tg["lon_deg"] + sc.tc_lon_deg) * _DEG
+        self.tgt_alt = tg["alt_m"] + sc.tc_alt_m
+        self.tgt_fpa = (tg["fpa_deg"] + sc.tc_fpa_deg) * _DEG
+        self._tgt_psi = (tg["heading_deg"] + sc.tc_psi_deg) * _DEG
+
     # -- Gymnasium API -----------------------------------------------------
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
         if seed is not None:
             self._rng = np.random.default_rng(seed)
-        ic = C.IC
-        lat0 = ic["lat_deg"] * _DEG
+        sc = (options or {}).get("scenario")
+        if sc is None and self.scenario_sampler is not None:
+            sc = self.scenario_sampler(self._rng)
+        if isinstance(sc, dict):
+            sc = Scenario.from_dict(sc)
+        self.scenario = sc if sc is not None else NOMINAL
+        self._model = self.scenario.model_factors()
+        self._set_target(self.scenario)
+
+        ic, s = C.IC, self.scenario
+        lat0 = (ic["lat_deg"] + s.ic_lat_deg) * _DEG
+        V0 = ic["V_mps"] + s.ic_V_mps
         z = np.zeros(self._n_state(), dtype=float)
-        z[0] = r_nd_from_alt(ic["alt_m"], lat0)
-        z[1] = ic["lon_deg"] * _DEG
+        z[0] = r_nd_from_alt(ic["alt_m"] + s.ic_alt_m, lat0)
+        z[1] = (ic["lon_deg"] + s.ic_lon_deg) * _DEG
         z[2] = lat0
-        z[3] = ic["V_mps"] / C.V_SCALE
-        z[4] = ic["fpa_deg"] * _DEG
-        z[5] = ic["heading_deg"] * _DEG
+        z[3] = V0 / C.V_SCALE
+        z[4] = (ic["fpa_deg"] + s.ic_fpa_deg) * _DEG
+        z[5] = (ic["heading_deg"] + s.ic_psi_deg) * _DEG
         z[6] = 0.0                                   # initial bank
         if self.optimize_aoa:
-            z[7] = nominal_aoa_deg(ic["V_mps"]) * _DEG
+            z[7] = nominal_aoa_deg(V0) * _DEG
         self._z = z
+        self._crossed = False
         self.t = 0.0
         self.steps = 0
         self.J = 0.0
@@ -157,13 +241,13 @@ class EntryEnvBase(gym.Env):
         sdot = float(np.clip(a[0], -1.0, 1.0)) * C.SIGMA_DOT_MAX
         adot = (float(np.clip(a[1], -1.0, 1.0)) * C.ALPHA_DOT_MAX) if self.optimize_aoa else 0.0
 
-        self._integrate(sdot, adot)
-        self.t += self.dt
+        dt = self._integrate(sdot, adot)
+        self.t += dt
         self.steps += 1
         self._update_cache()
 
         # heat-load increment over the step (trapezoid on Qdot)
-        dJ = 0.5 * (self._prev_qdot + self._c["Qdot"]) * self.dt
+        dJ = 0.5 * (self._prev_qdot + self._c["Qdot"]) * dt
         self.J += dJ
         self._prev_qdot = self._c["Qdot"]
 
@@ -214,11 +298,12 @@ class EntryEnvBase(gym.Env):
         # v8 dropped it entirely -> dive-and-land-far (discounting favors ending
         # the episode early). Uniform anchor kills both attractors: the return is
         # monotone in final distance AND far endings are expensive for all outcomes.
+        reached = self._crossed if self.exact_terminal else (alt <= self.tgt_alt)
         if bad:
             terminated = True
             r -= w.w_fail + position_penalty(cur_d_km, w)
             tinfo = {"outcome": "fail", "is_success": False}
-        elif alt <= self.tgt_alt:
+        elif reached:
             terminated = True
             d_km = self._landing_error_km()
             success = (d_km <= 1.0)
@@ -228,9 +313,6 @@ class EntryEnvBase(gym.Env):
             ramp = max(0.0, 1.0 - (d_km / w.succ_ramp_km) ** 2)
             r += -position_penalty(d_km, w) + w.w_succ * ramp
             tinfo = {"outcome": "reached", "is_success": bool(success),
-                     "d_km": d_km,
-                     "fpa_err_deg": abs(np.rad2deg(z[4]) - C.TARGET["fpa_deg"]),
-                     "psi_err_deg": abs(np.rad2deg(_wrap_pi(z[5] - self.tgt_psi))),
                      "J_heat": self.J, "tf_s": self.t}
         elif self.steps >= self.max_steps:
             truncated = True
@@ -241,12 +323,28 @@ class EntryEnvBase(gym.Env):
             chatter_mean = self._chatter / max(self.steps, 1)
             r -= w.w_smooth * chatter_mean
             tinfo["chatter_mean"] = chatter_mean
+            tinfo.update(self._terminal_errors())
 
         return r, terminated, truncated, tinfo
 
+    def _terminal_errors(self):
+        """Signed terminal errors against the episode's target (the SCvx
+        equality-constrained set: h, lat, lon, gamma, psi). The legacy
+        absolute keys fpa_err_deg / psi_err_deg are kept for old scripts."""
+        z, c = self._z, self._c
+        dfpa = float(np.rad2deg(z[4] - self.tgt_fpa))
+        dpsi = float(np.rad2deg(_wrap_pi(z[5] - self.tgt_psi)))
+        return {"d_km": self._landing_error_km(),
+                "dh_m": float(c["alt"] - self.tgt_alt),
+                "dlat_deg": float(np.rad2deg(z[2] - self.tgt_lat)),
+                "dlon_deg": float(np.rad2deg(_wrap_pi(z[1] - self.tgt_lon))),
+                "dfpa_deg": dfpa, "dpsi_deg": dpsi,
+                "fpa_err_deg": abs(dfpa), "psi_err_deg": abs(dpsi),
+                "V_f_mps": float(c["Vmps"])}
+
     @property
     def tgt_psi(self):
-        return C.TARGET["heading_deg"] * _DEG
+        return self._tgt_psi
 
     # -- observation -------------------------------------------------------
     def _obs(self):
@@ -270,7 +368,7 @@ class EntryEnvBase(gym.Env):
         # The linear range fraction above is ~1e-4 at single-km scale — invisible to
         # the nets — which capped the reward-only campaign at ~5 km (v14 post-mortem).
         # Kept LAST so older policies map onto a zero-padded input column.
-        if self.log_range_obs:
+        if self.obs_version != "v13":
             feats.append(np.log10(max(self._range_to_go() / 1000.0, 0.1)) / 4.0)
         return np.asarray(feats, dtype=np.float32)
 

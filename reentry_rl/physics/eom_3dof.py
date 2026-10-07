@@ -30,9 +30,12 @@ def _safe_cos(x, floor=1e-6):
     return np.where(np.abs(c) < floor, floor * sign, c)
 
 
-def translational_rhs(r, lon, lat, V, gamma, psi, sigma, alpha_deg):
-    """Return d/dt of [r, lon, lat, V, gamma, psi] (per physical second)."""
-    L, D, _rho, _CL, _CD = lift_drag_nd(r, lat, V, alpha_deg)
+def translational_rhs(r, lon, lat, V, gamma, psi, sigma, alpha_deg, model=None):
+    """Return d/dt of [r, lon, lat, V, gamma, psi] (per physical second).
+
+    `model` is an optional aero_wb001.ModelFactors dispersion (None = nominal).
+    """
+    L, D, _rho, _CL, _CD = lift_drag_nd(r, lat, V, alpha_deg, model)
     gR, gD = gravity_j2(r, lat)
 
     s = RATE_SCALE
