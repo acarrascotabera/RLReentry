@@ -25,6 +25,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
@@ -63,15 +64,21 @@ def checkpoints(run_dir):
 
 
 def best_model_steps(run_dir):
-    """Timestep at which EvalCallback saved best_model.zip (argmax eval reward)."""
+    """(timestep, score) of best_model.zip: from best/best.json (ValidationCallback,
+    score = selection score) or, for pre-2026-10 runs, from evaluations.npz
+    (EvalCallback, score = eval reward)."""
+    bj = run_dir / "best" / "best.json"
+    if bj.exists():
+        rec = json.loads(bj.read_text())
+        return int(rec["step"]), float(rec["score"])
     ev = np.load(run_dir / "evaluations.npz")
     mean_r = ev["results"].mean(axis=1)
     i = int(np.argmax(mean_r))
     return int(ev["timesteps"][i]), float(mean_r[i])
 
 
-def obs_rms_from_pkl(pkl, env_cls, weights, n_substeps):
-    venv = build_vecenv(env_cls, 1, weights, n_substeps, 0, subproc=False)
+def obs_rms_from_pkl(pkl, env_cls, weights, n_substeps, env_kwargs=None):
+    venv = build_vecenv(env_cls, 1, weights, n_substeps, 0, subproc=False, env_kwargs=env_kwargs)
     vn = VecNormalize.load(str(pkl), venv.venv)
     venv.close()
     return vn.obs_rms
@@ -115,9 +122,12 @@ def plot_learning_curves(run_dir, recs, out_prefix, title):
     t, v = series(recs, "ep_rew_mean")
     if t.size:
         a.plot(t / 1e6, v, color="C0", lw=0.9, label="train ep_rew_mean")
-    ev = np.load(run_dir / "evaluations.npz")
-    a.plot(ev["timesteps"] / 1e6, ev["results"].mean(axis=1), color="C1", lw=1.0,
-           alpha=0.8, label="eval (deterministic)")
+    ev = np.load(run_dir / "evaluations.npz") if (run_dir / "evaluations.npz").exists() else None
+    vh_path = run_dir / "eval" / "validation_history.csv"
+    vh = pd.read_csv(vh_path) if vh_path.exists() else None
+    if ev is not None:
+        a.plot(ev["timesteps"] / 1e6, ev["results"].mean(axis=1), color="C1", lw=1.0,
+               alpha=0.8, label="eval (deterministic)")
     a.set_xlabel("steps (M)"); a.set_ylabel("episode reward")
     a.set_title("Reward"); a.grid(True, alpha=.3); a.legend(fontsize=8)
 
@@ -131,6 +141,11 @@ def plot_learning_curves(run_dir, recs, out_prefix, title):
             ytop = np.nanmax(d) if np.isfinite(d).any() else 1e4
             a.semilogy(t[~ok] / 1e6, np.full((~ok).sum(), ytop * 1.5), "x", color="red",
                        ms=5, label="no landing (fail/timeout)")
+    if vh is not None:
+        a.semilogy(vh["step"] / 1e6, vh["nominal_d_km"], ".-", color="C1", lw=0.8, ms=3,
+                   label="validation: nominal d_km")
+        a.semilogy(vh["step"] / 1e6, vh["d_km_median"], ".-", color="C2", lw=0.8, ms=3,
+                   label="validation: median d_km")
     a.axhline(1.0, ls="--", color="green", alpha=.6, label="1 km success")
     a.set_xlabel("steps (M)"); a.set_ylabel("landing error (km)")
     a.set_title("Terminal position error"); a.grid(True, alpha=.3, which="both")
@@ -141,8 +156,9 @@ def plot_learning_curves(run_dir, recs, out_prefix, title):
     t, v = series(recs, "ep_len_mean")
     if t.size:
         a.plot(t / 1e6, v, color="C0", lw=0.9, label="train ep_len_mean")
-    a.plot(ev["timesteps"] / 1e6, ev["ep_lengths"].mean(axis=1), color="C1", lw=1.0,
-           alpha=0.8, label="eval")
+    if ev is not None:
+        a.plot(ev["timesteps"] / 1e6, ev["ep_lengths"].mean(axis=1), color="C1", lw=1.0,
+               alpha=0.8, label="eval")
     a.set_xlabel("steps (M)"); a.set_ylabel("episode length (steps)")
     a.set_title("Episode length"); a.grid(True, alpha=.3); a.legend(fontsize=8)
 
@@ -169,13 +185,14 @@ def rollout_and_plot(tag, model_zip, pkl, steps, run_dir, cfg, weights):
     stage = cfg["stage"]
     env_cls, j_ref = ENV_CLASSES[stage], J_REF[stage]
     n_substeps = cfg.get("n_substeps", 3)
+    env_kwargs = cfg.get("env_kwargs")      # obs layout / terminal measurement of the run
     outdir = run_dir / "diag" / tag
     outdir.mkdir(parents=True, exist_ok=True)
 
     model = PPO.load(str(model_zip), device="cpu")
-    obs_rms = obs_rms_from_pkl(pkl, env_cls, weights, n_substeps)
+    obs_rms = obs_rms_from_pkl(pkl, env_cls, weights, n_substeps, env_kwargs)
     summary, last = evaluate_to_csv(model, obs_rms, env_cls, weights, n_substeps,
-                                    j_ref, outdir, stage=stage)
+                                    j_ref, outdir, stage=stage, env_kwargs=env_kwargs)
     title = f"{run_dir.name} — {tag} ({steps/1e6:.2f}M steps)"
     miss = plot_trajectory(outdir / "eval_trajectory.csv", run_dir / "diag" / f"{tag}_traj",
                            title=title)
@@ -190,8 +207,10 @@ def refresh_best(run_dir, cfg, weights, cks):
     if not (best_zip.exists() and cks):
         return None
     bsteps, brew = best_model_steps(run_dir)
-    _, _, near_pkl = min(cks, key=lambda c: abs(c[0] - bsteps))
-    print(f"best model saved @ {bsteps:,} steps (eval reward {brew:+.1f}); "
+    near_pkl = run_dir / "best" / "best_vecnormalize.pkl"    # saved with the model (2026-10+)
+    if not near_pkl.exists():
+        _, _, near_pkl = min(cks, key=lambda c: abs(c[0] - bsteps))
+    print(f"best model saved @ {bsteps:,} steps (score {brew:+.3f}); "
           f"obs stats from {near_pkl.name}")
     rollout_and_plot("best", best_zip, near_pkl, bsteps, run_dir, cfg, weights)
     return bsteps

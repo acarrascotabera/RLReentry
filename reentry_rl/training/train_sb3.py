@@ -36,6 +36,7 @@ from reentry_rl.training.common import (ENV_CLASSES, J_REF, ensure_child_importa
                                         build_vecenv, evaluate_to_csv, ValidationCallback,
                                         load_validation_set, set_action_std)
 from reentry_rl.envs.rewards import RewardWeights
+from reentry_rl.training.curriculum import PRESETS, TerminalCurriculum
 
 # Manual defaults — these become the Optuna HPO search seed (milestone 2b).
 DEFAULT_PPO = dict(
@@ -68,6 +69,12 @@ def parse_args():
     ap.add_argument("--save-below", type=float, default=None,
                     help="also snapshot every model whose validation score is below this")
     ap.add_argument("--obs-version", default=None, help="observation layout (default: env default)")
+    ap.add_argument("--set-weight", action="append", default=[], metavar="KEY=VALUE",
+                    help="override any RewardWeights field (repeatable), e.g. w_ang_mult=0.25")
+    ap.add_argument("--curriculum", default=None, choices=sorted(PRESETS),
+                    help="terminal-tolerance curriculum on the FPA/heading reward channels")
+    ap.add_argument("--curriculum-min-steps", type=int, default=300_000)
+    ap.add_argument("--curriculum-pass-frac", type=float, default=0.75)
     ap.add_argument("--legacy-terminal", action="store_true",
                     help="terminal state at the first step below 25 km instead of the exact crossing")
     ap.add_argument("--ckpt-freq", type=int, default=250_000, help="total env steps between checkpoints")
@@ -157,6 +164,11 @@ def main():
             val = getattr(args, name)       # individual CLI overrides win over --hpo-best
             if val is not None:
                 setattr(weights, name, val)
+        for kv in args.set_weight:
+            key, val = kv.split("=", 1)
+            if key not in RewardWeights.__dataclass_fields__:
+                raise SystemExit(f"--set-weight: unknown RewardWeights field {key!r}")
+            setattr(weights, key, float(val))
         if args.ent_coef is not None:
             ppo_kwargs["ent_coef"] = args.ent_coef
         if args.gamma is not None:
@@ -176,8 +188,17 @@ def main():
             ppo_kwargs["learning_rate"] = linear_schedule(lr_base)
         ts = time.strftime("%Y%m%d_%H%M%S")
         outdir = Path(args.outdir) if args.outdir else repo_root / "results" / f"{args.stage}_train_{ts}"
-    for sub in ("", "tb", "ckpt", "best"):
+    for sub in ("", "tb", "ckpt", "best", "eval"):
         (outdir / sub).mkdir(parents=True, exist_ok=True)
+
+    curriculum = None
+    if args.curriculum:
+        curriculum = TerminalCurriculum(args.curriculum, outdir, pass_frac=args.curriculum_pass_frac,
+                                        min_steps=args.curriculum_min_steps)
+        if args.resume:
+            curriculum.restore()
+        curriculum.apply_to(weights)          # envs start at the current level
+        print(f"[curriculum] {args.curriculum} level {curriculum.level}: {curriculum.params()}")
 
     # Vectorized training env + a single-env eval env (EvalCallback syncs VecNormalize stats).
     venv = build_vecenv(env_cls, args.n_envs, weights, args.n_substeps, args.seed, subproc,
@@ -199,6 +220,8 @@ def main():
     val_cb = ValidationCallback(args.stage, val_scen, eval_freq, outdir, weights, env_kwargs,
                                 score_mode=args.score_mode, save_below=args.save_below,
                                 set_name=val_name, verbose=1)
+    if curriculum is not None:
+        val_cb.listeners.append(curriculum.on_validation)
     if args.resume and (outdir / "best" / "best.json").exists():
         # keep the pre-resume best (EvalCallback used to forget it and overwrite best/)
         val_cb.best = float(json.load(open(outdir / "best" / "best.json"))["score"])
@@ -250,6 +273,10 @@ def main():
             "net_arch": model.policy.net_arch,       # the model's real architecture
             "action_std": args.action_std,
             "env_kwargs": env_kwargs, "val_set": val_name, "score_mode": args.score_mode,
+            "curriculum": (None if curriculum is None else
+                           {"preset": args.curriculum, "min_steps": args.curriculum_min_steps,
+                            "pass_frac": args.curriculum_pass_frac, "levels": curriculum.levels,
+                            "base": curriculum.base}),
             "reward_weights": weights.__dict__,
         }, open(outdir / "config.json", "w"), indent=2)
 

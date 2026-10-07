@@ -116,6 +116,7 @@ class ValidationCallback(BaseCallback):
         self.set_name = set_name
         self.best = float("inf")
         self._runner = None
+        self.listeners = []          # fn(callback, df, rec) after each evaluation (curriculum)
         self.history_path = self.outdir / "eval" / "validation_history.csv"
         self.history_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -169,6 +170,8 @@ class ValidationCallback(BaseCallback):
             tag = f"step{step // 1000:06d}k_score{score:.3f}"
             self.model.save(str(snap / f"{tag}.zip"))
             self.training_env.save(str(snap / f"{tag}_vecnormalize.pkl"))
+        for fn in self.listeners:
+            fn(self, df, rec)
         if self.verbose:
             print(f"[val] step={step:,} score={score:.3f} best={self.best:.3f} "
                   f"d_med={rec['d_km_median']:.2f} km |dfpa|={rec['abs_dfpa_median']:.2f} "

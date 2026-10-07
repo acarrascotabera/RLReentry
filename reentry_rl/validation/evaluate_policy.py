@@ -51,7 +51,7 @@ def _env_classes():
 def obs_version_for(stage, obs_dim):
     """Infer the observation layout a model was trained with from its input width."""
     env_cls = _env_classes()[stage]
-    for ver in ("v13", "v15"):
+    for ver in ("v13", "v15", "v20"):
         if env_cls(obs_version=ver).observation_space.shape[0] == obs_dim:
             return ver
     raise ValueError(f"no {stage} observation layout has {obs_dim} features")

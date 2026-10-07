@@ -37,6 +37,28 @@ Tier 3 — PATH CONSTRAINTS, a capped per-step soft barrier. Zero on feasible
 trajectories (the 43.5 km v10-best glide never pays it), expensive on the
 8-16x-violating dives — so it also buries the dive attractor. The cap bounds
 the episode total so value scales stay sane.
+
+Tier 1b — TERMINAL FLIGHT PATH ANGLE AND HEADING (v20+; all weights default
+to 0, which is exactly the position-only reward of v1-v19). The SCvx handover
+fixes gamma_f = -10 deg and psi_f = 90 deg as equality constraints; each angle
+gets its own channel built on the same rules as the position tier:
+  * anchor   : -c * pen_x(|dx|) charged on EVERY ending (rule 1: no ending is
+               preferred for its own sake), separable per channel so one large
+               error cannot drown the gradient of the others and the position
+               term stays identical to the reward the warm-start policy knows;
+  * shaping  : potential G = c * [g_psi * pen_psi + g_fpa * pen_fpa] with gates
+               g in [0,1] that switch on near the end (heading by range-to-go,
+               FPA by altitude). Mid-glide gamma ~ -1 deg and psi ~ 20 deg are
+               correct, so an ungated potential would pull the vehicle into the
+               early dive of v8/v11. G is a function of the state only, so the
+               shaping still telescopes (G(s_0) = 0) and leaves the optimum
+               unchanged; total angle return = -(1 + g(s_N)) * c * pen(s_N),
+               monotone in the terminal errors on every ending;
+  * bonus    : concave w * (1 - (dx/ramp)^2)^+ per channel on landing (the v18
+               anti-dispersion argument); ramps are tightened by the curriculum.
+pen_x is a linear/convex-blend well inside x_lin and log shelves outside, like
+the position potential. c (w_ang_mult) and the ramps are set per curriculum
+level (training/curriculum.py).
 """
 from dataclasses import dataclass
 
@@ -84,6 +106,23 @@ class RewardWeights:
     w_path: float = 1.0     # * min(sum of soft barriers, path_cap)
     path_soft: float = 0.9  # fraction of the limit where the barrier turns on
     path_cap: float = 3.0   # per-step cap on the summed barrier
+    # ---- tier 1b: terminal FPA and heading (0 = position-only reward of v1-v19) ----
+    w_ang_mult: float = 0.0     # curriculum multiplier c on both angle anchors + shaping
+    fpa_lin_deg: float = 2.0    # gamma well: pen(fpa_lin) = w_fpa_lin * fpa_lin = 200
+    w_fpa_lin: float = 100.0    #   [1/deg]
+    w_fpa_log: float = 300.0    #   per decade beyond fpa_lin (pen(15 deg) ~ 460)
+    psi_lin_deg: float = 10.0   # heading well: pen(psi_lin) = 200
+    w_psi_lin: float = 20.0     #   [1/deg]
+    w_psi_log: float = 300.0    #   per decade beyond psi_lin (pen(70 deg) ~ 450)
+    ang_convexity: float = 0.5  # near-field linear<->quadratic blend (as near_convexity)
+    psi_gate_hi_km: float = 1000.0  # heading shaping gate: 0 beyond, 1 inside psi_gate_lo
+    psi_gate_lo_km: float = 200.0   #   (a 70 deg turn needs a ~100-400 km arc)
+    fpa_gate_hi_km: float = 40.0    # FPA shaping gate on ALTITUDE: 0 above, 1 below lo
+    fpa_gate_lo_km: float = 28.0
+    w_succ_fpa: float = 0.0     # concave landing bonus w*(1 - (dgamma/fpa_ramp)^2)^+
+    fpa_ramp_deg: float = 20.0
+    w_succ_psi: float = 0.0     # concave landing bonus w*(1 - (dpsi/psi_ramp)^2)^+
+    psi_ramp_deg: float = 90.0
 
 
 def path_barrier(ratio, soft=0.9):
@@ -122,3 +161,32 @@ def position_penalty(d_km, w: RewardWeights):
     return (w.w_lin * w.d_lin_km
             + w.w_pos * (logd - log_lin)
             + w.w_near * (min(logd, float(np.log10(w.d_near_km))) - log_lin))
+
+
+def well_penalty(x, w_lin, x_lin, w_log, convexity):
+    """Generic terminal-error well for |error| x >= 0: linear/quadratic blend
+    inside x_lin (pen(x_lin) = w_lin*x_lin for every blend), w_log per decade
+    outside. Same construction as position_penalty, without the extra shelf."""
+    x = max(float(x), 0.0)
+    if x <= x_lin:
+        u = x / x_lin
+        return w_lin * x_lin * ((1.0 - convexity) * u + convexity * u * u)
+    return w_lin * x_lin + w_log * float(np.log10(x / x_lin))
+
+
+def fpa_penalty(dfpa_deg, w: RewardWeights):
+    return well_penalty(abs(dfpa_deg), w.w_fpa_lin, w.fpa_lin_deg, w.w_fpa_log, w.ang_convexity)
+
+
+def psi_penalty(dpsi_deg, w: RewardWeights):
+    return well_penalty(abs(dpsi_deg), w.w_psi_lin, w.psi_lin_deg, w.w_psi_log, w.ang_convexity)
+
+
+def smooth_gate(x, hi, lo):
+    """C1 smoothstep: 0 for x >= hi, 1 for x <= lo (lo < hi)."""
+    u = float(np.clip((hi - x) / (hi - lo), 0.0, 1.0))
+    return u * u * (3.0 - 2.0 * u)
+
+
+def concave_bonus(x, ramp):
+    return max(0.0, 1.0 - (float(x) / ramp) ** 2)

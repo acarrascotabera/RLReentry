@@ -22,6 +22,8 @@ first 1 s step below the target altitude — at the ~300 m/s handover speed
 that is up to ~0.3 km of horizontal travel, the same order as the best
 landing errors, so legacy numbers carry that measurement quantization.
 """
+from dataclasses import replace
+
 import numpy as np
 import gymnasium as gym
 from gymnasium import spaces
@@ -32,7 +34,8 @@ from ..physics.geodesy import (altitude_m, r_nd_from_alt,
                                great_circle_distance_m, bearing_rad)
 from ..physics.aero_wb001 import nominal_aoa_deg, cl_cd, path_quantities
 from ..physics.eom_3dof import translational_rhs
-from .rewards import RewardWeights, path_barrier, position_penalty
+from .rewards import (RewardWeights, path_barrier, position_penalty, fpa_penalty,
+                      psi_penalty, smooth_gate, concave_bonus)
 from .scenario import Scenario, NOMINAL
 
 _DEG = np.pi / 180.0
@@ -41,7 +44,16 @@ _DEG = np.pi / 180.0
 # be rolled out; new features are only ever APPENDED (see expand_obs.py).
 #   v13 : 12 base features (+ AoA in Stage 2)
 #   v15 : + log10 range-to-go (added at campaign v15)
-OBS_VERSIONS = ("v13", "v15")
+#   v20 : + 8 terminal-state features: FPA and heading errors to the handover
+#         target (linear and signed-log, resolution down to the 0.1 % tolerance),
+#         log altitude-to-go (the episode ends on altitude), and the bearing to
+#         the target relative to the required final heading (approach geometry)
+OBS_VERSIONS = ("v13", "v15", "v20")
+
+
+def _slog(x, scale):
+    """Signed log magnitude: per-decade resolution of x down to `scale`."""
+    return float(np.sign(x) * np.log10(1.0 + abs(x) / scale))
 
 
 def _wrap_pi(a):
@@ -56,9 +68,13 @@ class EntryEnvBase(gym.Env):
 
     def __init__(self, weights: RewardWeights = None, dt=1.0, n_substeps=3,
                  max_steps=2500, j_ref=None, seed=None, log_range_obs=True,
-                 obs_version=None, exact_terminal=True, scenario_sampler=None):
+                 obs_version=None, exact_terminal=True, rate_saturation=True,
+                 scenario_sampler=None):
         super().__init__()
-        self.w = weights if weights is not None else RewardWeights()
+        # private copy: DummyVecEnv hands every env the same weights object, and the
+        # curriculum changes weights per env (set_reward_params)
+        self.w = replace(weights) if weights is not None else RewardWeights()
+        self._pending_w = {}
         self.dt = float(dt)
         self.n_substeps = int(n_substeps)
         self.max_steps = int(max_steps)
@@ -67,6 +83,7 @@ class EntryEnvBase(gym.Env):
         if self.obs_version not in OBS_VERSIONS:
             raise ValueError(f"obs_version must be one of {OBS_VERSIONS}")
         self.exact_terminal = bool(exact_terminal)
+        self.rate_saturation = bool(rate_saturation)
         self.scenario_sampler = scenario_sampler
         self.J_ref = float(j_ref) if j_ref is not None else C.J_REF_BANK_ONLY
 
@@ -91,7 +108,19 @@ class EntryEnvBase(gym.Env):
         n = 12 + (1 if self.optimize_aoa else 0)
         if self.obs_version != "v13":
             n += 1
+        if self.obs_version == "v20":
+            n += 8
         return n
+
+    # -- curriculum hook ------------------------------------------------------
+    def set_reward_params(self, **params):
+        """Queue reward-weight changes; applied at the next reset so a potential
+        never changes inside an episode (that would break the telescoping)."""
+        for k in params:
+            if not hasattr(self.w, k):
+                raise AttributeError(f"RewardWeights has no field {k!r}")
+        self._pending_w.update(params)
+        return True
 
     def _n_state(self):
         return 7 + (1 if self.optimize_aoa else 0)
@@ -105,8 +134,24 @@ class EntryEnvBase(gym.Env):
 
     # -- dynamics ----------------------------------------------------------
     def _deriv(self, z, sdot, adot):
-        alpha_deg = np.rad2deg(z[7]) if self.optimize_aoa else nominal_aoa_deg(z[3] * C.V_SCALE)
-        d6 = translational_rhs(z[0], z[1], z[2], z[3], z[4], z[5], z[6], alpha_deg, self._model)
+        sigma = z[6]
+        alpha_rad = z[7] if self.optimize_aoa else None
+        if self.rate_saturation:
+            # saturated integrator: forces use the bounded attitude and an outward
+            # rate at a bound is zero. Without this the RK4 stages evaluate the aero
+            # at z + c*h*rate, i.e. up to h*15 deg/s = 5 deg beyond ALPHA_MAX, and
+            # a rate command "into" the limit silently buys extra AoA.
+            lo, hi = C.BANK_MIN, C.BANK_MAX
+            if (sigma >= hi and sdot > 0.0) or (sigma <= lo and sdot < 0.0):
+                sdot = 0.0
+            sigma = min(max(sigma, lo), hi)
+            if self.optimize_aoa:
+                lo, hi = C.ALPHA_MIN * _DEG, C.ALPHA_MAX * _DEG
+                if (alpha_rad >= hi and adot > 0.0) or (alpha_rad <= lo and adot < 0.0):
+                    adot = 0.0
+                alpha_rad = min(max(alpha_rad, lo), hi)
+        alpha_deg = np.rad2deg(alpha_rad) if self.optimize_aoa else nominal_aoa_deg(z[3] * C.V_SCALE)
+        d6 = translational_rhs(z[0], z[1], z[2], z[3], z[4], z[5], sigma, alpha_deg, self._model)
         dz = np.zeros_like(z)
         dz[0:6] = d6
         dz[6] = sdot
@@ -202,6 +247,9 @@ class EntryEnvBase(gym.Env):
         super().reset(seed=seed)
         if seed is not None:
             self._rng = np.random.default_rng(seed)
+        for k, v in self._pending_w.items():
+            setattr(self.w, k, v)
+        self._pending_w = {}
         sc = (options or {}).get("scenario")
         if sc is None and self.scenario_sampler is not None:
             sc = self.scenario_sampler(self._rng)
@@ -234,6 +282,7 @@ class EntryEnvBase(gym.Env):
         self._prev_d_km = self._range_to_go() / 1000.0
         self._prev_action = np.zeros(self.n_actions)
         self._chatter = 0.0
+        self._prev_G = self._angle_potential()
         return self._obs(), self._info()
 
     def step(self, action):
@@ -267,6 +316,12 @@ class EntryEnvBase(gym.Env):
         cur_d_km = self._range_to_go() / 1000.0
         r = position_penalty(self._prev_d_km, w) - position_penalty(cur_d_km, w)
         self._prev_d_km = cur_d_km
+
+        # gated potential shaping of the terminal FPA/heading (tier 1b, 0 when off)
+        if w.w_ang_mult > 0.0:
+            G = self._angle_potential()
+            r += self._prev_G - G
+            self._prev_G = G
 
         # chattering: ACCUMULATE action change; charged once at the end as the
         # episode mean (a per-step sum taxes long glides by episode length x
@@ -323,7 +378,15 @@ class EntryEnvBase(gym.Env):
             chatter_mean = self._chatter / max(self.steps, 1)
             r -= w.w_smooth * chatter_mean
             tinfo["chatter_mean"] = chatter_mean
-            tinfo.update(self._terminal_errors())
+            terr = self._terminal_errors()
+            tinfo.update(terr)
+            # tier 1b anchors: uniform on every ending, like the position anchor
+            pf, pp = fpa_penalty(terr["dfpa_deg"], w), psi_penalty(terr["dpsi_deg"], w)
+            r -= w.w_ang_mult * (pf + pp)
+            if tinfo["outcome"] == "reached":
+                r += (w.w_succ_fpa * concave_bonus(terr["dfpa_deg"], w.fpa_ramp_deg)
+                      + w.w_succ_psi * concave_bonus(terr["dpsi_deg"], w.psi_ramp_deg))
+            tinfo["pen_fpa"], tinfo["pen_psi"] = pf, pp
 
         return r, terminated, truncated, tinfo
 
@@ -341,6 +404,18 @@ class EntryEnvBase(gym.Env):
                 "dfpa_deg": dfpa, "dpsi_deg": dpsi,
                 "fpa_err_deg": abs(dfpa), "psi_err_deg": abs(dpsi),
                 "V_f_mps": float(c["Vmps"])}
+
+    def _angle_potential(self):
+        """G(s) = c * [g_psi(range) * pen_psi + g_fpa(alt) * pen_fpa] (0 when tier 1b is off)."""
+        w = self.w
+        if w.w_ang_mult <= 0.0:
+            return 0.0
+        z, c = self._z, self._c
+        g_psi = smooth_gate(self._range_to_go() / 1000.0, w.psi_gate_hi_km, w.psi_gate_lo_km)
+        g_fpa = smooth_gate(c["alt"] / 1000.0, w.fpa_gate_hi_km, w.fpa_gate_lo_km)
+        dpsi = float(np.rad2deg(_wrap_pi(z[5] - self.tgt_psi)))
+        dfpa = float(np.rad2deg(z[4] - self.tgt_fpa))
+        return w.w_ang_mult * (g_psi * psi_penalty(dpsi, w) + g_fpa * fpa_penalty(dfpa, w))
 
     @property
     def tgt_psi(self):
@@ -370,6 +445,19 @@ class EntryEnvBase(gym.Env):
         # Kept LAST so older policies map onto a zero-padded input column.
         if self.obs_version != "v13":
             feats.append(np.log10(max(self._range_to_go() / 1000.0, 0.1)) / 4.0)
+        if self.obs_version == "v20":
+            dfpa = np.rad2deg(z[4] - self.tgt_fpa)
+            dpsi_rad = _wrap_pi(z[5] - self.tgt_psi)
+            dpsi = np.rad2deg(dpsi_rad)
+            brg = bearing_rad(z[2], z[1], self.tgt_lat, self.tgt_lon) - self.tgt_psi
+            feats += [
+                dfpa / 10.0,                                  # FPA error to the handover
+                _slog(dfpa, 0.01) / 3.0,                      #   resolution to 0.01 deg (0.1 %)
+                np.sin(dpsi_rad), np.cos(dpsi_rad),           # heading error (wrap-safe)
+                _slog(dpsi, 0.09) / 3.3,                      #   resolution to 0.09 deg (0.1 %)
+                np.log10(max(c["alt"] - self.tgt_alt, 1.0)) / 5.0,   # altitude-to-go [m]
+                np.sin(brg), np.cos(brg),                     # target bearing vs final heading
+            ]
         return np.asarray(feats, dtype=np.float32)
 
     # -- info (cheap; full physical state for logging / CSV export) --------
