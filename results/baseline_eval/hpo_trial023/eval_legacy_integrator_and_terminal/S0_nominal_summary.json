@@ -114,5 +114,7 @@
     NaN
    ]
   }
- }
+ },
+ "rate_saturation": false,
+ "note": "computed before the saturated-integrator fix (legacy RK4 attitude bounds)"
 }
