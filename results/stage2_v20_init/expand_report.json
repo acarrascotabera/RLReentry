@@ -1,0 +1,54 @@
+{
+ "old_dim": 14,
+ "new_dim": 22,
+ "grown": [
+  "mlp_extractor.policy_net.0.weight",
+  "mlp_extractor.value_net.0.weight"
+ ],
+ "new_feature_mean": [
+  0.8681,
+  0.9228,
+  -0.9838,
+  0.135,
+  -0.8968,
+  0.9206,
+  -0.789,
+  0.1262
+ ],
+ "new_feature_std": [
+  0.3014,
+  0.3356,
+  0.0185,
+  0.1168,
+  0.011,
+  0.0533,
+  0.5785,
+  0.1641
+ ],
+ "stats_set": "S2_val_x0.1",
+ "stats_samples": 25096,
+ "aoa_unlock": {
+  "raw_aoa_rate_min": -0.8346637487411499,
+  "raw_aoa_rate_max": 0.7010704278945923,
+  "bias_shift": 0.0
+ },
+ "verify_nominal": {
+  "d_km": [
+   259.44423879702885,
+   259.44423879702885
+  ],
+  "dfpa_deg": [
+   -11.136930361731016,
+   -11.136930361731016
+  ],
+  "dpsi_deg": [
+   -71.3511716553236,
+   -71.3511716553236
+  ],
+  "tf_s": [
+   1552.5464949055652,
+   1552.5464949055652
+  ]
+ },
+ "verify_identical": true
+}
