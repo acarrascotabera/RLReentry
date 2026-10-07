@@ -31,6 +31,9 @@ results/**
 !results/**/evaluations.npz
 !results/**/study.db
 !results/**/eval/**
+!results/**/eval_*/**
 results/**/eval/**/*.png
 results/**/eval/**/*.svg
+results/**/eval_*/**/*.png
+results/**/eval_*/**/*.svg
 !results/scvx_mc/**
