@@ -682,3 +682,29 @@ potential is ~0.5/km out here, below the return noise and below the expected pea
 penalty that exploration triggers near the constraint boundary. Root cause of
 v20b-v20d: the position potential was designed for a warm start within a few km
 of the target; under the corrected dynamics the start is 100-300 km out.
+
+**v20d outcome — done (10M, 2026-10-07 20:56):** best = 0.1M (88 km, peak 1.005);
+final 515 km, dfpa 14.2 deg, dpsi 94.9 deg, feasible. Collapse at ~1.8M (value
+loss ~1e6, explained variance 0.3 for ~1M steps; dive to ~5,000 km at peak ratio
+12): the 1000-weight peak charge made returns too variable for the critic. It
+then spent ~6.5M steps recovering to ~500 km; flat over the last 1M (return
+slope +0.4/M). Curves: results/curves/ (plot_chain_curves). At equal cumulative
+chain steps the v20 chain (74 km at 1.5M) matched the old chain (60-300 km over
+1-3M; 10 km first at ~3.4M, 0.27 km at ~6.3M + HPO).
+
+### Monte Carlo on the SCvx campaigns' exact scenarios (2026-10-08)
+
+Scored with identical metrics (scvx_benchmark.py, evaluate_policy.py); SCvx is full
+closed-loop G&C, RL is 3-DOF guidance with an ideal attitude loop.
+
+| method | campaign | median d [km] | p95 d [km] | median dfpa/dpsi [deg] | feasible | <= 1 km | VISTA tol | 0.1 % tol |
+|---|---|---|---|---|---|---|---|---|
+| SCvx G&C | gc_ic_tc (1001) | 0.21 | 307 | 0.30 / 0.62 | 39.5 % | 19.1 % | 18.7 % | 0.8 % |
+| SCvx G&C | gc_models (501) | 0.33 | 102 | 0.54 / 1.08 | 33.7 % | 15.0 % | 14.2 % | 0.6 % |
+| RL v20d best | gc_ic_tc | 256 | 655 | 12.6 / 71.1 | 19.0 % | 0 | 0 | 0 |
+| RL v20d best | gc_models | 741 | 2,701 | 11.1 / 70.6 | 16.8 % | 0 | 0 | 0 |
+| RL HPO t23 (corrected) | gc_ic_tc | 387 | 1,360 | 13.9 / 70.9 | 30.1 % | 0 | 0 | 0 |
+| RL HPO t23 (corrected) | gc_models | 1,459 | 2,598 | 16.7 / 71.2 | 29.1 % | 0 | 0 | 0 |
+
+The 0.1 % criterion is stricter than SCvx achieves (its nominal ends at
+dfpa -0.097 deg, load factor 1.3 % over the limit).
