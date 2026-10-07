@@ -14,8 +14,9 @@ Objective (MINIMIZE): the best validation score seen during the trial
               infeasible:                                    e = 1000 + error
               no handover reached:                           e = 10000 + error
     aggregate: 90th percentile over cases (one case = its value)
-With --val-set S0_nominal --score-mode position --legacy-terminal this is
-exactly the objective of the July 2026 study (the 0.273 km trial 23). The
+With --val-set S0_nominal --score-mode position --legacy-terminal
+--legacy-integrator this is exactly the objective of the July 2026 study
+(the 0.273 km trial 23). The
 running MINIMUM is reported to the MedianPruner. Any evaluation below
 `save-below` saves the model + VecNormalize immediately (lesson from v19: the
 best policies lived between checkpoints and were lost).
@@ -167,6 +168,8 @@ def main():
     ap.add_argument("--score-mode", default="position", choices=["position", "full"])
     ap.add_argument("--legacy-terminal", action="store_true",
                     help="measure at the first step below 25 km (July 2026 study behaviour)")
+    ap.add_argument("--legacy-integrator", action="store_true",
+                    help="attitude bounds only after each RK4 substep (July 2026 study dynamics)")
     ap.add_argument("--weights-from", default=None,
                     help="config.json whose reward_weights replace the frozen v19 reward")
     ap.add_argument("--outdir", default=None)
@@ -187,7 +190,8 @@ def main():
         for k, v in _json.load(open(args.weights_from))["reward_weights"].items():
             if k in RewardWeights.__dataclass_fields__:
                 setattr(weights, k, v)
-    env_kwargs = {"exact_terminal": not args.legacy_terminal}
+    env_kwargs = {"exact_terminal": not args.legacy_terminal,
+                  "rate_saturation": not args.legacy_integrator}
     _val_name, val_scen = load_validation_set(args.val_set)
 
     storage = f"sqlite:///{(outdir / 'study.db').as_posix()}"

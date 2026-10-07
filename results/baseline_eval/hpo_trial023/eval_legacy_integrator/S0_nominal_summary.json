@@ -1,0 +1,120 @@
+{
+ "set": "S0_nominal",
+ "set_file": "results\\eval_sets\\S0_nominal.json",
+ "model": "results/results/stage2_polish_hpo/trial023_0.27km_300k.zip",
+ "vn": "results/results/stage2_polish_hpo/trial023_0.27km_300k_vecnormalize.pkl",
+ "stage": "stage2",
+ "exact_terminal": true,
+ "wall_s": 13.3,
+ "n": 1,
+ "outcomes": {
+  "reached": 1
+ },
+ "feasible_rate": 1.0,
+ "success_rate": {
+  "rel_0p1pct": 0.0,
+  "rel_1pct": 0.0,
+  "vista_mc": 0.0,
+  "pos_1km": 1.0
+ },
+ "stats": {
+  "d_km": {
+   "mean": 0.41753091087565697,
+   "median": 0.41753091087565697,
+   "p95": 0.41753091087565697,
+   "p99": 0.41753091087565697,
+   "max": 0.41753091087565697,
+   "iqm": 0.41753091087565697,
+   "iqm_ci95": [
+    NaN,
+    NaN
+   ]
+  },
+  "abs_dfpa_deg": {
+   "mean": 14.84260120227196,
+   "median": 14.84260120227196,
+   "p95": 14.84260120227196,
+   "p99": 14.84260120227196,
+   "max": 14.84260120227196,
+   "iqm": 14.84260120227196,
+   "iqm_ci95": [
+    NaN,
+    NaN
+   ]
+  },
+  "abs_dpsi_deg": {
+   "mean": 69.73911595089604,
+   "median": 69.73911595089604,
+   "p95": 69.73911595089604,
+   "p99": 69.73911595089604,
+   "max": 69.73911595089604,
+   "iqm": 69.73911595089604,
+   "iqm_ci95": [
+    NaN,
+    NaN
+   ]
+  },
+  "abs_dlat_deg": {
+   "mean": 0.00250832256695105,
+   "median": 0.00250832256695105,
+   "p95": 0.00250832256695105,
+   "p99": 0.00250832256695105,
+   "max": 0.00250832256695105,
+   "iqm": 0.00250832256695105,
+   "iqm_ci95": [
+    NaN,
+    NaN
+   ]
+  },
+  "abs_dlon_deg": {
+   "mean": 0.008153204299112185,
+   "median": 0.008153204299112185,
+   "p95": 0.008153204299112185,
+   "p99": 0.008153204299112185,
+   "max": 0.008153204299112185,
+   "iqm": 0.008153204299112185,
+   "iqm_ci95": [
+    NaN,
+    NaN
+   ]
+  },
+  "J_ratio": {
+   "mean": 0.9477764912737374,
+   "median": 0.9477764912737374,
+   "p95": 0.9477764912737374,
+   "p99": 0.9477764912737374,
+   "max": 0.9477764912737374,
+   "iqm": 0.9477764912737374,
+   "iqm_ci95": [
+    NaN,
+    NaN
+   ]
+  },
+  "max_ratio": {
+   "mean": 0.9521261530603528,
+   "median": 0.9521261530603528,
+   "p95": 0.9521261530603528,
+   "p99": 0.9521261530603528,
+   "max": 0.9521261530603528,
+   "iqm": 0.9521261530603528,
+   "iqm_ci95": [
+    NaN,
+    NaN
+   ]
+  },
+  "alpha_std_deg": {
+   "mean": 0.0,
+   "median": 0.0,
+   "p95": 0.0,
+   "p99": 0.0,
+   "max": 0.0,
+   "iqm": 0.0,
+   "iqm_ci95": [
+    NaN,
+    NaN
+   ]
+  }
+ },
+ "rate_saturation": false,
+ "note": "computed before the saturated-integrator fix (legacy RK4 attitude bounds)"
+}

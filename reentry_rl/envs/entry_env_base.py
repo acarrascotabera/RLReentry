@@ -21,6 +21,13 @@ terminal state is re-integrated to it. Without it, the terminal state is the
 first 1 s step below the target altitude — at the ~300 m/s handover speed
 that is up to ~0.3 km of horizontal travel, the same order as the best
 landing errors, so legacy numbers carry that measurement quantization.
+
+With `rate_saturation` (default) bank and AoA behave as saturated integrators
+inside every RK4 stage. Without it (legacy) the bounds were applied only after
+each substep, so the stages evaluated the aero at up to h*15 deg/s = 5 deg
+beyond ALPHA_MAX: the v10-HPO policies commanded +3..+10 deg/s into the 40 deg
+limit and flew an effective AoA of ~40.5-41.6 deg (HPO-best: 0.42 km legacy,
+259 km and q-bar/n ratio 2.0 with the bound enforced).
 """
 import numpy as np
 import gymnasium as gym
@@ -56,7 +63,8 @@ class EntryEnvBase(gym.Env):
 
     def __init__(self, weights: RewardWeights = None, dt=1.0, n_substeps=3,
                  max_steps=2500, j_ref=None, seed=None, log_range_obs=True,
-                 obs_version=None, exact_terminal=True, scenario_sampler=None):
+                 obs_version=None, exact_terminal=True, rate_saturation=True,
+                 scenario_sampler=None):
         super().__init__()
         self.w = weights if weights is not None else RewardWeights()
         self.dt = float(dt)
@@ -67,6 +75,7 @@ class EntryEnvBase(gym.Env):
         if self.obs_version not in OBS_VERSIONS:
             raise ValueError(f"obs_version must be one of {OBS_VERSIONS}")
         self.exact_terminal = bool(exact_terminal)
+        self.rate_saturation = bool(rate_saturation)
         self.scenario_sampler = scenario_sampler
         self.J_ref = float(j_ref) if j_ref is not None else C.J_REF_BANK_ONLY
 
@@ -105,8 +114,24 @@ class EntryEnvBase(gym.Env):
 
     # -- dynamics ----------------------------------------------------------
     def _deriv(self, z, sdot, adot):
-        alpha_deg = np.rad2deg(z[7]) if self.optimize_aoa else nominal_aoa_deg(z[3] * C.V_SCALE)
-        d6 = translational_rhs(z[0], z[1], z[2], z[3], z[4], z[5], z[6], alpha_deg, self._model)
+        sigma = z[6]
+        alpha_rad = z[7] if self.optimize_aoa else None
+        if self.rate_saturation:
+            # saturated integrator: forces use the bounded attitude and an outward
+            # rate at a bound is zero. Without this the RK4 stages evaluate the aero
+            # at z + c*h*rate, i.e. up to h*15 deg/s = 5 deg beyond ALPHA_MAX, and
+            # a rate command "into" the limit silently buys extra AoA.
+            lo, hi = C.BANK_MIN, C.BANK_MAX
+            if (sigma >= hi and sdot > 0.0) or (sigma <= lo and sdot < 0.0):
+                sdot = 0.0
+            sigma = min(max(sigma, lo), hi)
+            if self.optimize_aoa:
+                lo, hi = C.ALPHA_MIN * _DEG, C.ALPHA_MAX * _DEG
+                if (alpha_rad >= hi and adot > 0.0) or (alpha_rad <= lo and adot < 0.0):
+                    adot = 0.0
+                alpha_rad = min(max(alpha_rad, lo), hi)
+        alpha_deg = np.rad2deg(alpha_rad) if self.optimize_aoa else nominal_aoa_deg(z[3] * C.V_SCALE)
+        d6 = translational_rhs(z[0], z[1], z[2], z[3], z[4], z[5], sigma, alpha_deg, self._model)
         dz = np.zeros_like(z)
         dz[0:6] = d6
         dz[6] = sdot
