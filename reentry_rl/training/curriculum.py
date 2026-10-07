@@ -14,6 +14,13 @@ by level:
     4      1.00         0.5       2          and after >= `min_steps` at the level
     5      1.00         0.1       0.5
 
+Preset "v20r" prepends a position re-acquisition level (angle channels off,
+advance once d <= 5 km): under the corrected dynamics the warm start is ~300 km
+from the target, where the log position potential is nearly flat (~0.15/km)
+while the level-0 heading bonus pays ~4.3/deg, so v20b traded position for
+heading (308 -> 349 km while dpsi 77 -> 65 deg). Level keys starting with "_"
+are curriculum metadata (pass criteria), not reward weights.
+
 Weights are pushed to every training env with env_method("set_reward_params")
 and take effect at each env's next reset. The level history is written to
 <run>/eval/curriculum.csv and the current level to <run>/curriculum_state.json
@@ -36,6 +43,11 @@ PRESETS = {
             {"w_ang_mult": 1.00, "fpa_ramp_deg": 0.1, "psi_ramp_deg": 0.5},
         ]),
 }
+PRESETS["v20r"] = dict(
+    base=dict(PRESETS["v20"]["base"]),
+    levels=[{"w_ang_mult": 0.0, "w_succ_fpa": 0.0, "w_succ_psi": 0.0,
+             "_d_pass_km": 5.0, "_check_angles": False}]
+           + [{**lv, "w_succ_fpa": 250.0, "w_succ_psi": 250.0} for lv in PRESETS["v20"]["levels"]])
 
 
 class TerminalCurriculum:
@@ -56,8 +68,9 @@ class TerminalCurriculum:
 
     # -- state ---------------------------------------------------------------
     def params(self, level=None):
+        """Reward weights of a level (metadata keys starting with '_' removed)."""
         lv = self.level if level is None else level
-        return {**self.base, **self.levels[lv]}
+        return {k: v for k, v in {**self.base, **self.levels[lv]}.items() if not k.startswith("_")}
 
     def apply_to(self, weights):
         for k, v in self.params().items():
@@ -83,11 +96,13 @@ class TerminalCurriculum:
 
     # -- decision --------------------------------------------------------------
     def passed(self, df):
-        p = self.levels[self.level]
+        lv = self.levels[self.level]
+        p = {**self.base, **lv}
         ok = ((df["outcome"] == "reached") & (df["max_ratio"] <= 1.02)
-              & (df["d_km"] <= self.d_pass_km)
-              & (df["dfpa_deg"].abs() <= p["fpa_ramp_deg"] / 2.0)
-              & (df["dpsi_deg"].abs() <= p["psi_ramp_deg"] / 2.0))
+              & (df["d_km"] <= lv.get("_d_pass_km", self.d_pass_km)))
+        if lv.get("_check_angles", True):
+            ok &= ((df["dfpa_deg"].abs() <= p["fpa_ramp_deg"] / 2.0)
+                   & (df["dpsi_deg"].abs() <= p["psi_ramp_deg"] / 2.0))
         return float(ok.mean())
 
     def on_validation(self, callback, df, rec):
