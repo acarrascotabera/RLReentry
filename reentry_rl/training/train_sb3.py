@@ -104,6 +104,8 @@ def parse_args():
     ap.add_argument("--batch-size", type=int, default=None, help="override PPO minibatch size")
     ap.add_argument("--n-steps", type=int, default=None, help="override PPO rollout length per env")
     ap.add_argument("--n-epochs", type=int, default=None, help="override PPO epochs per update")
+    ap.add_argument("--target-kl", type=float, default=None,
+                    help="stop an update's epochs early once approx KL > 1.5 x this (PPO target_kl)")
     ap.add_argument("--init-model", default=None,
                     help="warm-start: initialize policy/value weights from this model .zip "
                          "(fresh run dir + timesteps; stored hyperparams apply unless overridden)")
@@ -186,6 +188,8 @@ def main():
             ppo_kwargs["n_steps"] = args.n_steps
         if args.n_epochs is not None:
             ppo_kwargs["n_epochs"] = args.n_epochs
+        if args.target_kl is not None:
+            ppo_kwargs["target_kl"] = args.target_kl
         lr_base = ppo_kwargs["learning_rate"] if isinstance(ppo_kwargs["learning_rate"], (int, float)) else DEFAULT_PPO["learning_rate"]
         if args.lr_decay:
             ppo_kwargs["learning_rate"] = linear_schedule(lr_base)
@@ -251,6 +255,8 @@ def main():
             overrides["ent_coef"] = args.ent_coef
         if args.gamma is not None:
             overrides["gamma"] = args.gamma
+        if args.target_kl is not None:
+            overrides["target_kl"] = args.target_kl
         model = PPO.load(args.init_model, env=venv, seed=args.seed, device="cpu",
                          tensorboard_log=tb_log, verbose=1, **overrides)
         print(f"[init] warm-started from {args.init_model} (overrides: {sorted(overrides)})")
@@ -272,7 +278,8 @@ def main():
                     for k, v in ppo_kwargs.items() if k != "policy_kwargs"},
             "ppo_effective": {"gamma": model.gamma, "gae_lambda": model.gae_lambda,
                               "n_steps": model.n_steps, "batch_size": model.batch_size,
-                              "n_epochs": model.n_epochs, "ent_coef": model.ent_coef},
+                              "n_epochs": model.n_epochs, "ent_coef": model.ent_coef,
+                              "target_kl": model.target_kl},
             "net_arch": model.policy.net_arch,       # the model's real architecture
             "action_std": args.action_std,
             "env_kwargs": env_kwargs, "val_set": val_name, "score_mode": args.score_mode,
