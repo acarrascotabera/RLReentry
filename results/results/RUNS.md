@@ -587,3 +587,33 @@ deterministic rollouts of the HPO-best policy `trial023_0.27km_300k.zip`.
 
 Legacy behaviour stays reproducible: `--legacy-terminal --legacy-integrator`
 (train_sb3, hpo_optuna, evaluate_policy) gives 0.2728 km again.
+
+### v20 — running (launched 2026-10-07): full terminal state, corrected dynamics
+
+Branch `point2-full-terminal-state`. First run with the saturated attitude
+integrator and the exact 25 km crossing, so its numbers are not comparable to
+v1-v19/HPO (see above). Objective: the SCvx handover set — position within a
+1 km radius, h/gamma/psi within 0.1 % (25 m, 0.01 deg, 0.09 deg) — inside the
+path constraints.
+
+- Warm start: HPO trial 23 expanded to the v20 observation layout (22 features,
+  `results/stage2_v20_init/expand_report.json`; verified same trajectory). Under
+  the corrected dynamics it starts at 259 km, dfpa -11.1 deg, dpsi -71.4 deg,
+  q-bar/n ratio 2.0 — the run must first re-acquire position.
+- Reward: v19 position tiers (w_succ 500, succ_ramp 6 km) + tier 1b FPA/heading
+  channels under the `v20` curriculum (6 levels; level 0: c = 0.25, ramps 20 deg /
+  90 deg, angle bonuses 250 each; advance on 2 consecutive passing validations
+  after >= 300k steps at the level).
+- PPO: HPO trial-23 settings (lr 1.41e-4 decayed, clip 0.079, ent 3.6e-4,
+  n_steps 4096, batch 256, epochs 5, gamma 0.99965, lambda 0.908), action std
+  0.021 (bank) / 0.1 (AoA rate — AoA exploration re-opened).
+- Selection: ValidationCallback on S0_nominal, score_mode full
+  (||(d/1 km, dfpa/1 deg, dpsi/5 deg)||, +1000 infeasible), every 100k steps.
+
+Command: `train_sb3 --stage stage2 --timesteps 10000000 --n-envs 8
+--init-model results/stage2_v20_init/model_expanded.zip
+--init-vn results/stage2_v20_init/vecnormalize_expanded.pkl --obs-version v20
+--action-std 0.021,0.1 --lr 1.41e-4 --lr-decay --clip-range 0.079
+--ent-coef 3.6e-4 --w-succ 500 --succ-ramp-km 6 --curriculum v20
+--val-set S0_nominal --score-mode full --eval-freq 100000 --save-below 5
+--seed 0 --outdir results/stage2_v20`
