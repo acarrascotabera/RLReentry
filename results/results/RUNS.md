@@ -657,3 +657,18 @@ approx_kl ~0.003.
 Command: as v20b with `--init-model results/stage2_v20c_init/model.zip
 --init-vn results/stage2_v20c_init/vecnormalize.pkl --curriculum v20r
 --outdir results/stage2_v20c`
+
+**v20c outcome — stopped at 2.0M (2026-10-07):** position-only re-acquisition
+worked at first (314 -> 59.6 km by 1.0M) but the policy then alternated
+between two regimes: AoA modulated (std 6-7 deg) -> 60-106 km but q-bar 1.4-3.5x
+the limit; AoA locked at 40 deg -> feasible but 100-180 km. The 2M rollout dives
+the last 17 s with alpha = 5 deg and bank = -85 deg, reaching 25 km at
+V = 1772 m/s (q-bar 3.5x). The per-step barrier capped at 3 priced that at
+<= 51 units, cheaper than the position it bought.
+
+### v20d — running (launched 2026-10-07 13:30): peak-violation charge
+
+As v20c plus `--set-weight w_peak=1000`: -1000 * max(0, episode peak ratio - 1)
+charged once on every ending (5 % overshoot = -50, the 3.5x dive = -2500).
+Warm start: v20c best (0.9M, 73.6 km, peak ratio 1.007), copied to
+results/stage2_v20d_init/.
