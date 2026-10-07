@@ -106,6 +106,11 @@ class RewardWeights:
     w_path: float = 1.0     # * min(sum of soft barriers, path_cap)
     path_soft: float = 0.9  # fraction of the limit where the barrier turns on
     path_cap: float = 3.0   # per-step cap on the summed barrier
+    w_peak: float = 0.0     # terminal charge on the episode's WORST constraint excess,
+                            # -w_peak * max(0, peak_ratio - 1) on every ending (0 = off).
+                            # The capped per-step barrier makes a short extreme violation
+                            # cheap: v20c dove the last 17 s at q-bar = 3.5x the limit for
+                            # <= 51 units. Charged once, like the chatter mean (rule 2).
     # ---- tier 1b: terminal FPA and heading (0 = position-only reward of v1-v19) ----
     w_ang_mult: float = 0.0     # curriculum multiplier c on both angle anchors + shaping
     fpa_lin_deg: float = 2.0    # gamma well: pen(fpa_lin) = w_fpa_lin * fpa_lin = 200

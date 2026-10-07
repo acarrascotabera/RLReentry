@@ -290,6 +290,7 @@ class EntryEnvBase(gym.Env):
         self._prev_action = np.zeros(self.n_actions)
         self._chatter = 0.0
         self._prev_G = self._angle_potential()
+        self._peak_ratio = 0.0
         return self._obs(), self._info()
 
     def step(self, action):
@@ -348,6 +349,8 @@ class EntryEnvBase(gym.Env):
                     + path_barrier(c["qbar"] / C.QBAR_MAX, w.path_soft)
                     + path_barrier(c["n"] / C.N_MAX, w.path_soft))
         r -= w.w_path * min(bar, w.path_cap)
+        self._peak_ratio = max(self._peak_ratio, c["Qdot"] / C.QDOT_MAX,
+                               c["qbar"] / C.QBAR_MAX, c["n"] / C.N_MAX)
 
         terminated = truncated = False
         tinfo = {}
@@ -385,6 +388,9 @@ class EntryEnvBase(gym.Env):
             chatter_mean = self._chatter / max(self.steps, 1)
             r -= w.w_smooth * chatter_mean
             tinfo["chatter_mean"] = chatter_mean
+            # worst path-constraint excess of the episode, charged once on every ending
+            r -= w.w_peak * max(0.0, self._peak_ratio - 1.0)
+            tinfo["peak_ratio"] = self._peak_ratio
             terr = self._terminal_errors()
             tinfo.update(terr)
             # tier 1b anchors: uniform on every ending, like the position anchor
