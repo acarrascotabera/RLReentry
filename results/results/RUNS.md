@@ -617,3 +617,22 @@ Command: `train_sb3 --stage stage2 --timesteps 10000000 --n-envs 8
 --ent-coef 3.6e-4 --w-succ 500 --succ-ramp-km 6 --curriculum v20
 --val-set S0_nominal --score-mode full --eval-freq 100000 --save-below 5
 --seed 0 --outdir results/stage2_v20`
+
+**v20 outcome — stopped at 0.6M (2026-10-07):** PPO updates far outside the
+trust region: approx_kl 2-14 per update (healthy ~0.01-0.05), clip_fraction
+0.4-0.6, train return falling -773 -> -916, nominal d stuck at 250-285 km. Cause:
+the HPO action std 0.021 was tuned to POLISH a converged trajectory; with that
+std a 0.06 shift of the bank-rate mean is already KL ~ 4, so every lr-1.41e-4
+update overshoots by ~100x while the policy has to re-learn its trajectory
+under the corrected dynamics. (Feasibility was regained by 0.2M.)
+
+### v20b — running (launched 2026-10-07 11:17): v20 with re-acquisition settings
+
+Identical to v20 except the PPO/exploration settings, back to the v12-v16 recipe
+that re-acquired position from 43 km: action std 0.1 (bank) / 0.15 (AoA rate),
+lr 1e-4 decayed, clip 0.15, ent 0, plus target_kl 0.05 (new --target-kl).
+First updates: approx_kl 0.002-0.006, clip_fraction 0.04-0.06, return
+-813 -> -757 by 0.16M.
+
+Command: as v20 with `--action-std 0.1,0.15 --lr 1e-4 --lr-decay --clip-range 0.15
+--ent-coef 0.0 --target-kl 0.05 --outdir results/stage2_v20b`
