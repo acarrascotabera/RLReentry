@@ -1,8 +1,9 @@
 """Stage-1 full training (PPO).
 
 Real training run: SubprocVecEnv parallelism, TensorBoard + Monitor logging,
-periodic deterministic evaluation with best-model checkpointing, and a final
-eval + trajectory CSV vs the SCP reference. Intended for multi-million-step runs.
+periodic deterministic evaluation on a fixed validation set with best-model
+checkpointing (ValidationCallback), and a final eval + trajectory CSV vs the
+SCP reference. Intended for multi-million-step runs.
 
 Run (from anywhere; runnable as a file or via -m):
     python e:/reentry_RL/reentry_rl/training/train_sb3.py --timesteps 3000000 --n-envs 8
@@ -12,7 +13,8 @@ Inspect learning curves:
     tensorboard --logdir results/stage1_train_<ts>/tb
 
 Artifacts in results/stage1_train_<ts>/:
-    model.zip, vecnormalize.pkl, config.json, best/, ckpt/, evaluations.npz,
+    model.zip, vecnormalize.pkl, config.json, best/ (best_model.zip,
+    best_vecnormalize.pkl, best.json), ckpt/, snapshots/, eval/validation_history.csv,
     eval_trajectory.csv, eval_summary.txt, tb/
 """
 import argparse
@@ -28,10 +30,11 @@ if __package__ in (None, ""):
     _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[2]))
 
 from stable_baselines3 import PPO
-from stable_baselines3.common.callbacks import EvalCallback, CheckpointCallback
+from stable_baselines3.common.callbacks import CheckpointCallback
 
 from reentry_rl.training.common import (ENV_CLASSES, J_REF, ensure_child_importable,
-                                        build_vecenv, evaluate_to_csv, StageMetricsCallback)
+                                        build_vecenv, evaluate_to_csv, ValidationCallback,
+                                        load_validation_set, set_action_std)
 from reentry_rl.envs.rewards import RewardWeights
 
 # Manual defaults — these become the Optuna HPO search seed (milestone 2b).
@@ -58,6 +61,15 @@ def parse_args():
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--no-subproc", action="store_true", help="use DummyVecEnv (single process)")
     ap.add_argument("--eval-freq", type=int, default=50_000, help="total env steps between evals")
+    ap.add_argument("--val-set", default="S0_nominal",
+                    help="validation set for model selection (results/eval_sets/<name>.json or path)")
+    ap.add_argument("--score-mode", default="position", choices=["position", "full"],
+                    help="selection score: landing error only, or ||(d/1km, dfpa/1deg, dpsi/5deg)||")
+    ap.add_argument("--save-below", type=float, default=None,
+                    help="also snapshot every model whose validation score is below this")
+    ap.add_argument("--obs-version", default=None, help="observation layout (default: env default)")
+    ap.add_argument("--legacy-terminal", action="store_true",
+                    help="terminal state at the first step below 25 km instead of the exact crossing")
     ap.add_argument("--ckpt-freq", type=int, default=250_000, help="total env steps between checkpoints")
     ap.add_argument("--outdir", default=None)
     # reward-weight overrides (the main tuning knobs)
@@ -88,9 +100,9 @@ def parse_args():
                          "(fresh run dir + timesteps; stored hyperparams apply unless overridden)")
     ap.add_argument("--init-vn", default=None,
                     help="VecNormalize .pkl to initialize obs stats (use with --init-model)")
-    ap.add_argument("--action-std", type=float, default=None,
-                    help="set the policy's initial action std (warm-start polish: e.g. 0.2 "
-                         "so exploration noise doesn't wreck a good trajectory)")
+    ap.add_argument("--action-std", default=None,
+                    help="set the policy's initial action std, one value or one per action "
+                         "(e.g. 0.02,0.15 to re-open AoA exploration on a bank-converged policy)")
     ap.add_argument("--tb", action="store_true", help="enable TensorBoard logging (off by default; flaky on Windows)")
     ap.add_argument("--resume", default=None, help="resume from the latest checkpoint in this run dir (continues in place)")
     return ap.parse_args()
@@ -105,6 +117,9 @@ def main():
 
     env_cls = ENV_CLASSES[args.stage]
     j_ref = J_REF[args.stage]
+    env_kwargs = {"exact_terminal": not args.legacy_terminal}
+    if args.obs_version:
+        env_kwargs["obs_version"] = args.obs_version
 
     weights = RewardWeights()
     ppo_kwargs = dict(DEFAULT_PPO)
@@ -165,7 +180,8 @@ def main():
         (outdir / sub).mkdir(parents=True, exist_ok=True)
 
     # Vectorized training env + a single-env eval env (EvalCallback syncs VecNormalize stats).
-    venv = build_vecenv(env_cls, args.n_envs, weights, args.n_substeps, args.seed, subproc)
+    venv = build_vecenv(env_cls, args.n_envs, weights, args.n_substeps, args.seed, subproc,
+                        env_kwargs)
     if args.resume:                         # restore observation/return normalization stats
         from stable_baselines3.common.vec_env import VecNormalize
         venv = VecNormalize.load(str(resume_vn), venv.venv)
@@ -176,20 +192,18 @@ def main():
         venv = VecNormalize.load(args.init_vn, venv.venv)
         venv.training = True
         venv.norm_reward = False
-    eval_venv = build_vecenv(env_cls, 1, weights, args.n_substeps, args.seed + 10_000, subproc=False)
-    eval_venv.training = False
-    eval_venv.norm_reward = False
-
     # eval_freq / ckpt_freq are given in TOTAL env steps -> convert to per-env-call counts.
     eval_freq = max(args.eval_freq // args.n_envs, 1)
     ckpt_freq = max(args.ckpt_freq // args.n_envs, 1)
-    eval_cb = EvalCallback(eval_venv, best_model_save_path=str(outdir / "best"),
-                           log_path=str(outdir), eval_freq=eval_freq,
-                           n_eval_episodes=1, deterministic=True, render=False)
+    val_name, val_scen = load_validation_set(args.val_set)
+    val_cb = ValidationCallback(args.stage, val_scen, eval_freq, outdir, weights, env_kwargs,
+                                score_mode=args.score_mode, save_below=args.save_below,
+                                set_name=val_name, verbose=1)
+    if args.resume and (outdir / "best" / "best.json").exists():
+        # keep the pre-resume best (EvalCallback used to forget it and overwrite best/)
+        val_cb.best = float(json.load(open(outdir / "best" / "best.json"))["score"])
     ckpt_cb = CheckpointCallback(save_freq=ckpt_freq, save_path=str(outdir / "ckpt"),
                                  name_prefix="ppo", save_vecnormalize=True)
-    metrics_cb = StageMetricsCallback(env_cls, weights, args.n_substeps, j_ref,
-                                      eval_freq, venv, seed=args.seed + 20_000)
 
     tb_log = str(outdir / "tb") if args.tb else None
     if args.resume:
@@ -219,11 +233,8 @@ def main():
                     tensorboard_log=tb_log, **ppo_kwargs)
 
     if args.action_std is not None:
-        import math
-        import torch
-        with torch.no_grad():
-            model.policy.log_std.fill_(math.log(args.action_std))
-        print(f"[init] policy action std set to {args.action_std}")
+        stds = set_action_std(model, [float(v) for v in str(args.action_std).split(",")])
+        print(f"[init] policy action std set to {stds}")
 
     if not args.resume:
         json.dump({
@@ -233,7 +244,12 @@ def main():
             "init_model": args.init_model, "init_vn": args.init_vn,
             "ppo": {k: (v if isinstance(v, (int, float, str)) else "schedule")
                     for k, v in ppo_kwargs.items() if k != "policy_kwargs"},
-            "net_arch": ppo_kwargs["policy_kwargs"]["net_arch"],
+            "ppo_effective": {"gamma": model.gamma, "gae_lambda": model.gae_lambda,
+                              "n_steps": model.n_steps, "batch_size": model.batch_size,
+                              "n_epochs": model.n_epochs, "ent_coef": model.ent_coef},
+            "net_arch": model.policy.net_arch,       # the model's real architecture
+            "action_std": args.action_std,
+            "env_kwargs": env_kwargs, "val_set": val_name, "score_mode": args.score_mode,
             "reward_weights": weights.__dict__,
         }, open(outdir / "config.json", "w"), indent=2)
 
@@ -241,13 +257,14 @@ def main():
           f"subproc={subproc} substeps={args.n_substeps} -> {outdir}")
     t0 = time.time()
     model.learn(total_timesteps=args.timesteps, reset_num_timesteps=not bool(args.resume),
-                callback=[eval_cb, ckpt_cb, metrics_cb], progress_bar=False)
+                callback=[val_cb, ckpt_cb], progress_bar=False)
     train_s = time.time() - t0
 
     model.save(str(outdir / "model.zip"))
     venv.save(str(outdir / "vecnormalize.pkl"))
     summary, _ = evaluate_to_csv(model, venv.obs_rms, env_cls, weights, args.n_substeps,
-                                 j_ref, outdir, stage=args.stage, seed=args.seed + 999)
+                                 j_ref, outdir, stage=args.stage, seed=args.seed + 999,
+                                 env_kwargs=env_kwargs)
 
     print("\n" + "=" * 64)
     print(f"{args.stage} training done in {train_s/60:.1f} min -> {outdir}")

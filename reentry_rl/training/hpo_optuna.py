@@ -8,14 +8,20 @@ study searches exactly those. Every trial warm-starts from the campaign-best
 model (v16-best, 5.39 km) and its VecNormalize statistics, keeping the
 512x512 architecture fixed (required by the warm start).
 
-Objective (MINIMIZE): the best feasibility-gated deterministic landing error
-seen during the trial —
-    feasible (max path-constraint ratio <= 1.02):  score = d_km
-    infeasible:                                    score = 1000 + d_km
-evaluated every `eval-freq` steps on a fixed eval seed; the running MINIMUM is
-reported to the MedianPruner. Any evaluation below `save-below` km saves the
-model + VecNormalize immediately (lesson from v19: the best policies lived
-between checkpoints and were lost).
+Objective (MINIMIZE): the best validation score seen during the trial
+(evaluate_policy.selection_score over the --val-set scenarios) —
+    per case, feasible (max path-constraint ratio <= 1.02):  e = terminal error
+              infeasible:                                    e = 1000 + error
+              no handover reached:                           e = 10000 + error
+    aggregate: 90th percentile over cases (one case = its value)
+With --val-set S0_nominal --score-mode position --legacy-terminal this is
+exactly the objective of the July 2026 study (the 0.273 km trial 23). The
+running MINIMUM is reported to the MedianPruner. Any evaluation below
+`save-below` saves the model + VecNormalize immediately (lesson from v19: the
+best policies lived between checkpoints and were lost).
+
+Note: the July study ran with the v19 reward (frozen_weights below), warm
+started from v16-best which had been trained with the v16 linear well.
 
 TPE sampler + MedianPruner, SQLite storage -> fully resumable:
 
@@ -24,7 +30,6 @@ TPE sampler + MedianPruner, SQLite storage -> fully resumable:
         --init-vn results/stage2_v16/ckpt/ppo_vecnormalize_2500000_steps.pkl
 """
 import argparse
-import math
 import time
 from pathlib import Path
 
@@ -34,14 +39,14 @@ if __package__ in (None, ""):
     _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parents[2]))
 
 import optuna
-import torch
 from stable_baselines3 import PPO
 from stable_baselines3.common.callbacks import BaseCallback
 from stable_baselines3.common.vec_env import VecNormalize
 
 from reentry_rl.envs.rewards import RewardWeights
 from reentry_rl.training.common import ENV_CLASSES, J_REF, ensure_child_importable, \
-    build_vecenv, rollout_metrics
+    build_vecenv, load_validation_set, set_action_std
+from reentry_rl.validation.evaluate_policy import PolicyRunner, selection_score
 
 
 def frozen_weights():
@@ -72,66 +77,68 @@ def sample_ppo(trial):
 
 
 class PolishScoreCallback(BaseCallback):
-    """Every eval_freq calls: deterministic rollout -> feasibility-gated d_km;
-    track the trial minimum, report to the pruner, and save any sub-threshold
-    model immediately."""
+    """Every eval_freq calls: deterministic rollouts on the validation set ->
+    selection score; track the trial minimum, report to the pruner, and save
+    any sub-threshold model immediately."""
 
-    def __init__(self, trial, env_cls, weights, n_substeps, j_ref, eval_freq,
-                 outdir, save_below_km, verbose=0):
+    def __init__(self, trial, stage, scenarios, weights, env_kwargs, score_mode, eval_freq,
+                 outdir, save_below, verbose=0):
         super().__init__(verbose)
         self.trial = trial
-        self.env_cls = env_cls
+        self.stage = stage
+        self.scenarios = scenarios
         self.weights = weights
-        self.n_substeps = n_substeps
-        self.j_ref = j_ref
+        self.env_kwargs = env_kwargs
+        self.score_mode = score_mode
         self.eval_freq = max(int(eval_freq), 1)
         self.outdir = Path(outdir)
-        self.save_below_km = float(save_below_km)
+        self.save_below = float(save_below)
         self.best = float("inf")
         self.best_d = float("nan")
-
-    def _score(self, m):
-        gated = m["d_km"] if m["max_ratio"] <= 1.02 else 1000.0 + m["d_km"]
-        return float(gated), float(m["d_km"])
+        self._runner = None
 
     def _on_step(self):
         if self.n_calls % self.eval_freq != 0:
             return True
-        m = rollout_metrics(self.model, self.training_env.obs_rms, self.env_cls,
-                            self.weights, self.n_substeps, self.j_ref)
-        score, d = self._score(m)
+        rms = self.training_env.obs_rms
+        if self._runner is None:
+            self._runner = PolicyRunner(self.model, rms, self.stage, self.weights, self.env_kwargs)
+        self._runner.mean = rms.mean.astype("float64")
+        self._runner.std = (rms.var.astype("float64") + 1e-8) ** 0.5
+        df = self._runner.run_many(self.scenarios)
+        score = selection_score(df, self.score_mode)
+        d = float(df["d_km"].median())
         if score < self.best:
             self.best, self.best_d = score, d
-            if score < self.save_below_km:      # feasible AND close -> keep the model
-                tag = f"trial{self.trial.number:03d}_{d:.2f}km_{self.num_timesteps//1000}k"
+            if score < self.save_below:         # feasible AND close -> keep the model
+                tag = f"trial{self.trial.number:03d}_{score:.2f}_{self.num_timesteps//1000}k"
                 self.model.save(str(self.outdir / f"{tag}.zip"))
                 self.training_env.save(str(self.outdir / f"{tag}_vecnormalize.pkl"))
                 print(f"[hpo] trial {self.trial.number}: SAVED {tag} "
-                      f"(maxQ={m['max_Qdot']:.2f} maxN={m['max_n']:.2f})")
+                      f"(median d={d:.2f} km, max ratio={df['max_ratio'].max():.2f})")
         self.trial.report(self.best, self.num_timesteps)
         if self.trial.should_prune():
             raise optuna.TrialPruned()
         return True
 
 
-def objective(trial, args, env_cls, j_ref, weights):
+def objective(trial, args, env_cls, j_ref, weights, env_kwargs, val_scen):
     ppo_kwargs = sample_ppo(trial)
     action_std = trial.suggest_float("action_std", 0.02, 0.3, log=True)
 
     venv = build_vecenv(env_cls, args.n_envs, weights, args.n_substeps,
-                        seed=args.seed, subproc=not args.no_subproc)
+                        seed=args.seed, subproc=not args.no_subproc, env_kwargs=env_kwargs)
     venv = VecNormalize.load(args.init_vn, venv.venv)
     venv.training = True
     venv.norm_reward = False
 
     model = PPO.load(args.init_model, env=venv, device="cpu",
                      custom_objects=ppo_kwargs)
-    with torch.no_grad():
-        model.policy.log_std.fill_(math.log(action_std))
+    set_action_std(model, action_std)
 
-    cb = PolishScoreCallback(trial, env_cls, weights, args.n_substeps, j_ref,
+    cb = PolishScoreCallback(trial, args.stage, val_scen, weights, env_kwargs, args.score_mode,
                              eval_freq=max(args.eval_freq // args.n_envs, 1),
-                             outdir=args.outdir, save_below_km=args.save_below)
+                             outdir=args.outdir, save_below=args.save_below)
     try:
         model.learn(total_timesteps=args.steps_per_trial, callback=cb,
                     progress_bar=False)
@@ -154,7 +161,14 @@ def main():
     ap.add_argument("--init-model", required=True, help="warm-start model .zip (fixes net_arch)")
     ap.add_argument("--init-vn", required=True, help="warm-start VecNormalize .pkl")
     ap.add_argument("--save-below", type=float, default=6.0,
-                    help="save model+stats whenever a feasible eval lands below this [km]")
+                    help="save model+stats whenever the validation score is below this")
+    ap.add_argument("--val-set", default="S0_nominal",
+                    help="validation set (results/eval_sets/<name>.json or path)")
+    ap.add_argument("--score-mode", default="position", choices=["position", "full"])
+    ap.add_argument("--legacy-terminal", action="store_true",
+                    help="measure at the first step below 25 km (July 2026 study behaviour)")
+    ap.add_argument("--weights-from", default=None,
+                    help="config.json whose reward_weights replace the frozen v19 reward")
     ap.add_argument("--outdir", default=None)
     ap.add_argument("--study-name", default="stage2_polish_hpo")
     args = ap.parse_args()
@@ -168,6 +182,13 @@ def main():
 
     env_cls, j_ref = ENV_CLASSES[args.stage], J_REF[args.stage]
     weights = frozen_weights()
+    if args.weights_from:
+        import json as _json
+        for k, v in _json.load(open(args.weights_from))["reward_weights"].items():
+            if k in RewardWeights.__dataclass_fields__:
+                setattr(weights, k, v)
+    env_kwargs = {"exact_terminal": not args.legacy_terminal}
+    _val_name, val_scen = load_validation_set(args.val_set)
 
     storage = f"sqlite:///{(outdir / 'study.db').as_posix()}"
     study = optuna.create_study(
@@ -180,7 +201,7 @@ def main():
     print(f"[hpo] warm start: {args.init_model}")
     print(f"[hpo] frozen reward: {weights}")
     t0 = time.time()
-    study.optimize(lambda tr: objective(tr, args, env_cls, j_ref, weights),
+    study.optimize(lambda tr: objective(tr, args, env_cls, j_ref, weights, env_kwargs, val_scen),
                    n_trials=args.trials, gc_after_trial=True)
 
     print(f"\n[hpo] done in {(time.time()-t0)/3600:.1f} h — best trial:")
