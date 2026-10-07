@@ -33,3 +33,4 @@ results/**
 !results/**/eval/**
 results/**/eval/**/*.png
 results/**/eval/**/*.svg
+!results/scvx_mc/**
