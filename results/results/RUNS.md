@@ -672,3 +672,13 @@ As v20c plus `--set-weight w_peak=1000`: -1000 * max(0, episode peak ratio - 1)
 charged once on every ending (5 % overshoot = -50, the 3.5x dive = -2500).
 Warm start: v20c best (0.9M, 73.6 km, peak ratio 1.007), copied to
 results/stage2_v20d_init/.
+
+**v20d interim (1.0M, still running):** feasible throughout (peak ratio ~0.98-0.99,
+also under exploration noise) but drifting away: d 88 -> 157 -> 246 km, AoA
+locked. Reward bookkeeping of the deterministic rollouts: 88 km -> position cost
+1408 + barrier 52 + peak 5 = 1465; 246 km -> 1497 + 25 + 0 = 1522. The reward does
+prefer the near-target policy, but by ~60 units for 160 km: the log far-field
+potential is ~0.5/km out here, below the return noise and below the expected peak
+penalty that exploration triggers near the constraint boundary. Root cause of
+v20b-v20d: the position potential was designed for a warm start within a few km
+of the target; under the corrected dynamics the start is 100-300 km out.
