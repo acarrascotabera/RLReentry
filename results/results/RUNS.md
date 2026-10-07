@@ -636,3 +636,24 @@ First updates: approx_kl 0.002-0.006, clip_fraction 0.04-0.06, return
 
 Command: as v20 with `--action-std 0.1,0.15 --lr 1e-4 --lr-decay --clip-range 0.15
 --ent-coef 0.0 --target-kl 0.05 --outdir results/stage2_v20b`
+
+**v20b outcome — stopped at 1.0M (2026-10-07):** PPO healthy (approx_kl
+0.002-0.006) and AoA in use while infeasible (std ~7 deg), feasible from 0.5M
+(peak ratio 3.6 -> 0.99) but AoA then locked again and the policy traded
+position for heading: d 308 -> 349 km while dpsi 77 -> 65 deg, dfpa ~ -14 deg.
+Cause: reward balance of curriculum level 0. It was sized for a warm start near
+the target (0.4 km before the dynamics fix), but the start is now ~300 km out,
+where the log position potential slope is ~0.15/km against ~4.3/deg for the
+level-0 heading bonus (1 deg of heading ~ 30 km of position).
+
+### v20c — running (launched 2026-10-07 12:02): position re-acquisition first
+
+As v20b, but curriculum preset `v20r` (level 0 = angle channels OFF, advance
+once d <= 5 km on 2 consecutive validations after >= 300k steps; then the six
+v20 angle levels) and warm-started from v20b best (feasible, 308.6 km @0.6M;
+copied to results/stage2_v20c_init/). First validation: 314 km feasible,
+approx_kl ~0.003.
+
+Command: as v20b with `--init-model results/stage2_v20c_init/model.zip
+--init-vn results/stage2_v20c_init/vecnormalize.pkl --curriculum v20r
+--outdir results/stage2_v20c`
