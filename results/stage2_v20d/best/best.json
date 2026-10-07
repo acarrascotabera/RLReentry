@@ -1,0 +1,21 @@
+{
+ "step":100000,
+ "score":90.3920588456,
+ "n":1,
+ "reached_rate":1.0,
+ "feasible_rate":0.0,
+ "success_pos_1km":0.0,
+ "success_vista_mc":0.0,
+ "success_rel_1pct":0.0,
+ "success_rel_0p1pct":0.0,
+ "d_km_median":88.0070083311,
+ "abs_dfpa_median":14.7843289362,
+ "abs_dpsi_median":71.9225981278,
+ "max_ratio_max":1.004989119,
+ "alpha_std_mean":0.0368702441,
+ "nominal_d_km":88.0070083311,
+ "nominal_dfpa_deg":-14.7843289362,
+ "nominal_dpsi_deg":-71.9225981278,
+ "set":"S0_nominal",
+ "score_mode":"full"
+}
