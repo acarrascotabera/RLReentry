@@ -90,6 +90,11 @@ class RewardWeights:
                             # ~5 km operating region — keeping the terminal reward cleanly
                             # concave there (curvature -14/km²) with no pro-dispersion pocket
                             # (a 5 km ramp put a convex kink right where the policy lands)
+    w_far: float = 0.0      # LINEAR far-field term [1/km] between d_lin_km and d_far_km
+    d_far_km: float = 500.0 # (0 = off). The log shelves are ~0.5/km at 100-300 km — below
+                            # the return noise once the corrected dynamics put the warm start
+                            # 100-300 km out (v20b-v20d); constant beyond d_far, zero inside
+                            # d_lin so the near-target well is unchanged.
     w_fail: float = 50.0    # extra penalty on skip-out / crash / timeout
     # ---- tier 2: chattering ----
     w_smooth: float = 25.0  # * mean_t ‖a_t - a_{t-1}‖² at episode end (episode-mean:
@@ -155,7 +160,8 @@ def position_penalty(d_km, w: RewardWeights):
     anchor, so the return stays monotone in d_end across all endings (exploit-
     free). t>0 makes the near field CONVEX -> the terminal reward is concave ->
     landing dispersion is penalised -> PPO drives its action noise down (v18).
-    t=0 recovers the v16 linear (Jensen-neutral) well exactly."""
+    t=0 recovers the v16 linear (Jensen-neutral) well exactly. w_far adds
+    w_far*(min(d, d_far) - d_lin) beyond d_lin (continuous, monotone)."""
     d = max(float(d_km), 0.0)
     if d <= w.d_lin_km:
         x = d / w.d_lin_km
@@ -165,7 +171,8 @@ def position_penalty(d_km, w: RewardWeights):
     log_lin = float(np.log10(w.d_lin_km))
     return (w.w_lin * w.d_lin_km
             + w.w_pos * (logd - log_lin)
-            + w.w_near * (min(logd, float(np.log10(w.d_near_km))) - log_lin))
+            + w.w_near * (min(logd, float(np.log10(w.d_near_km))) - log_lin)
+            + w.w_far * (min(d, w.d_far_km) - w.d_lin_km))
 
 
 def well_penalty(x, w_lin, x_lin, w_log, convexity):
