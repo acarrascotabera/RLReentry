@@ -708,3 +708,22 @@ closed-loop G&C, RL is 3-DOF guidance with an ideal attitude loop.
 
 The 0.1 % criterion is stricter than SCvx achieves (its nominal ends at
 dfpa -0.097 deg, load factor 1.3 % over the limit).
+
+### v21 — running (launched 2026-10-08 18:24): long horizon, bounded returns, steep far field
+
+20M steps (lr decay over the full horizon), warm start from v20c best (0.9M,
+73.6 km, critic healthy), curriculum v20r from the position-only level.
+Reward changes vs v20d: `w_far = 2` per km between 10 and 500 km (88 -> 250 km
+now costs 369 units instead of 45; near field unchanged) and `w_peak = 200`
+(was 1000: 10 % overshoot -20, the 3.5x q-bar dive ~-550 incl. barrier, more than
+the ~400 that 100 km of position is now worth). Reward normalization not used:
+the warm-start critic was fitted on raw returns. PPO as v20b-v20d (std 0.1/0.15,
+lr 1e-4 decayed, clip 0.15, target_kl 0.05). 378 steps/s -> ~14.7 h.
+First validation: 118 km, approx_kl 0.002, explained variance 0.96.
+
+Command: `train_sb3 --stage stage2 --timesteps 20000000 --n-envs 8
+--init-model results/stage2_v21_init/model.zip --init-vn results/stage2_v21_init/vecnormalize.pkl
+--obs-version v20 --action-std 0.1,0.15 --lr 1e-4 --lr-decay --clip-range 0.15 --ent-coef 0.0
+--target-kl 0.05 --w-succ 500 --succ-ramp-km 6 --set-weight w_peak=200 --set-weight w_far=2
+--curriculum v20r --val-set S0_nominal --score-mode full --eval-freq 100000 --ckpt-freq 500000
+--save-below 5 --seed 0 --outdir results/stage2_v21`
