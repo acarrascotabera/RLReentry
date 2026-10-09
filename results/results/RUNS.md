@@ -757,3 +757,11 @@ Training analysis:
    the fixed penalty weights decide the margin (19 % of evaluations over the limit).
 5. Nominal-only training does not transfer: the nominal gain (88 -> 16 km) leaves the
    realistic-dispersion median at ~100 km and the SCvx scenarios at 264-795 km.
+
+### v21 resumed — running (2026-10-09 16:14): +10M steps (to 30M), LR warm restart
+
+`--resume results/stage2_v21 --timesteps 10000000 --lr-decay --lr-restart`: continues
+from the 20M checkpoint with the same reward/curriculum/validation, the learning rate
+restarted at 1e-4 and decayed to 0 over the new 10M (a plain resume would continue
+the old decay from ~3e-5). Best-model state preserved (15.1M, 16.2 km). Log:
+train_log_resume1.txt; segment record: resume_log.json. 407 steps/s -> ~6.8 h.

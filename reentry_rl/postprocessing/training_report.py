@@ -70,7 +70,10 @@ def load(run):
     vh["modulated"] = vh["alpha_std_mean"] > ALPHA_MOD_DEG
     vh["feasible"] = vh["max_ratio_max"] <= FEAS
     cur = pd.read_csv(run / "eval" / "curriculum.csv") if (run / "eval" / "curriculum.csv").exists() else None
-    recs = parse_train_log(run / "train_log.txt") if (run / "train_log.txt").exists() else []
+    recs = []                       # train_log.txt + train_log_resume*.txt, in order
+    for log in [run / "train_log.txt"] + sorted(run.glob("train_log_resume*.txt")):
+        if log.exists():
+            recs += parse_train_log(log)
     best = json.loads((run / "best" / "best.json").read_text()) if (run / "best" / "best.json").exists() else None
     return run, cfg, vh, cur, recs, best
 
