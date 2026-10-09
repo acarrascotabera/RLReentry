@@ -37,14 +37,14 @@
  },
  {
   "run": "v21",
-  "steps": 20021248,
-  "return_slope_per_M": 308.0275750929336,
-  "return_last_half_mean": -123.91799999999999,
-  "return_prev_half_mean": -232.125,
-  "log10_d_slope_per_M": -0.38886293003421246,
-  "best_score": 24.491367293284448,
-  "best_step": 15100000,
-  "steps_since_best": 4900000,
-  "last_d_km": 98.47547704684752
+  "steps": 30027008,
+  "return_slope_per_M": 49.84947942918316,
+  "return_last_half_mean": 1019.1333333333333,
+  "return_prev_half_mean": 1008.1875,
+  "log10_d_slope_per_M": -0.13590654600135452,
+  "best_score": 20.59463533041717,
+  "best_step": 29200000,
+  "steps_since_best": 800000,
+  "last_d_km": 11.502757967756269
  }
 ]

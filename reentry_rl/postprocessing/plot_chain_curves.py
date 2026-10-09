@@ -82,8 +82,10 @@ def _segments(chain):
     """-> list of dicts with offset, cutoff and data per run."""
     out, offset = [], 0
     for label, run, cut in chain:
-        log = run / "train_log.txt"
-        recs = parse_train_log(log) if log.exists() else []
+        recs = []                   # train_log.txt + train_log_resume*.txt, in order
+        for log in [run / "train_log.txt"] + sorted(run.glob("train_log_resume*.txt")):
+            if log.exists():
+                recs += parse_train_log(log)
         vh = run / "eval" / "validation_history.csv"
         out.append({"label": label, "run": run, "offset": offset, "cut": cut, "recs": recs,
                     "val": pd.read_csv(vh) if vh.exists() else None})
