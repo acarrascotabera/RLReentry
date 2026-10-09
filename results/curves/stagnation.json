@@ -25,14 +25,26 @@
  },
  {
   "run": "v20d",
-  "steps": 8552448,
-  "return_slope_per_M": -0.08613832535287115,
-  "return_last_half_mean": -695.0666666666667,
-  "return_prev_half_mean": -694.6875,
-  "log10_d_slope_per_M": 0.002489393092428309,
+  "steps": 10027008,
+  "return_slope_per_M": -0.38146972656252026,
+  "return_last_half_mean": -690.1333333333333,
+  "return_prev_half_mean": -689.6875,
+  "log10_d_slope_per_M": -0.002786393058036255,
   "best_score": 90.3920588456109,
   "best_step": 100000,
-  "steps_since_best": 8400000,
-  "last_d_km": 540.3129428052928
+  "steps_since_best": 9900000,
+  "last_d_km": 515.338366909054
+ },
+ {
+  "run": "v21",
+  "steps": 19202048,
+  "return_slope_per_M": -173.5564201108869,
+  "return_last_half_mean": -221.26666666666668,
+  "return_prev_half_mean": -151.125,
+  "log10_d_slope_per_M": 0.27666986237964525,
+  "best_score": 24.491367293284448,
+  "best_step": 15100000,
+  "steps_since_best": 4100000,
+  "last_d_km": 196.18469637684217
  }
 ]

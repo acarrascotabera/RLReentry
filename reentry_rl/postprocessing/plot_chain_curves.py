@@ -8,7 +8,8 @@ a discarded branch and is drawn faded.
 Figures (results/curves/):
   chain_comparison.png  nominal landing error, old campaign chain (legacy
                         dynamics, position-only reward) vs the v20 chain
-                        (corrected dynamics)
+                        (corrected dynamics), with its two branches from v20c:
+                        v20d (peak charge 1000) and v21 (20M steps, w_far, w_peak 200)
   v20_chain_terminal.png  v20 chain: landing error, FPA and heading errors,
                         peak path-constraint ratio, AoA spread, training return
   v20_chain_ppo.png     v20 chain: approx KL, explained variance, policy std,
@@ -52,6 +53,8 @@ OLD_HPO = (300_000, 0.273)          # trial 23: +0.3M polish steps, legacy measu
 V20_CHAIN = [("v20b", RES / "stage2_v20b", 600_000),
              ("v20c", RES / "stage2_v20c", 900_000),
              ("v20d", RES / "stage2_v20d", None)]
+V21_BRANCH = V20_CHAIN[:2] + [("v21", RES / "stage2_v21", None)]   # second branch from v20c best
+C4 = "#eda100"
 
 
 def _style(ax):
@@ -124,8 +127,11 @@ def chain_comparison(old, new, path):
         v = seg["val"]
         if v is None:
             continue
-        _plot_run(ax, v["step"].to_numpy(), v["nominal_d_km"].to_numpy(), seg["cut"], seg["offset"], C2,
-                  "v20 chain v20b-v20d (corrected dynamics)" if i == 0 else None, logy=True, ms=3)
+        col = C3 if seg["label"] == "v21" else C2
+        lab = ("v20 chain v20b-v20c-v20d (corrected dynamics)" if i == 0 else
+               "v21 branch from v20c best (20M steps)" if seg["label"] == "v21" else None)
+        _plot_run(ax, v["step"].to_numpy(), v["nominal_d_km"].to_numpy(), seg["cut"], seg["offset"], col,
+                  lab, logy=True, ms=3 if seg["label"] != "v21" else 2)
     for segs, ytxt, col in ((old[1:], 0.97, C1), (new[1:], 0.62, C2)):
         for seg in segs:
             ax.axvline(seg["offset"] / 1e6, color=GRID, lw=1.0, ls=":", zorder=0)
@@ -144,7 +150,7 @@ def chain_comparison(old, new, path):
 
 
 def v20_terminal(new, path):
-    cols = [C1, C2, C3]
+    cols = [C1, C2, C3, C4]
     panels = [("nominal landing error [km]", "nominal_d_km", True, None),
               ("|FPA error| at handover [deg]", "nominal_dfpa_deg", False, None),
               ("|heading error| at handover [deg]", "nominal_dpsi_deg", False, None),
@@ -187,7 +193,7 @@ def v20_terminal(new, path):
 
 
 def v20_ppo(new, path):
-    cols = [C1, C2, C3]
+    cols = [C1, C2, C3, C4]
     panels = [("approx KL per update (log)", "approx_kl", True, 0.05),
               ("explained variance of the value function", "explained_variance", False, None),
               ("policy std (mean over actions)", "std", False, None),
@@ -240,6 +246,8 @@ def stagnation(seg, window=1_000_000):
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     old, new = _segments(OLD_CHAIN), _segments(V20_CHAIN)
+    if (V21_BRANCH[-1][1] / "eval" / "validation_history.csv").exists():
+        new = new + _segments(V21_BRANCH)[-1:]
     chain_comparison(old, new, OUT / "chain_comparison.png")
     v20_terminal(new, OUT / "v20_chain_terminal.png")
     v20_ppo(new, OUT / "v20_chain_ppo.png")
