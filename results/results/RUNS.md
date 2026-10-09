@@ -765,3 +765,20 @@ from the 20M checkpoint with the same reward/curriculum/validation, the learning
 restarted at 1e-4 and decayed to 0 over the new 10M (a plain resume would continue
 the old decay from ~3e-5). Best-model state preserved (15.1M, 16.2 km). Log:
 train_log_resume1.txt; segment record: resume_log.json. 407 steps/s -> ~6.8 h.
+
+**v21 resumed outcome — done (30M, 2026-10-09 23:42).** New best **10.1 km** nominal
+(29.2M, peak ratio 0.98, feasible); final 11.5 km; last 1M steps all 9.6-15 km. The
+warm-restart segment is the cleanest learning of the campaign: d fell ~300 -> 10 km over
+22-30M (~1 decade per 5.5M steps) with the training return rising monotonically to
+~+1000 and no late drift. Still bank-only (alpha at 40 deg in every step), angle
+channels never active (5 km gate not reached): dfpa ~14 deg, dpsi 56-84 deg.
+
+| | nominal | realistic sweep median | realistic S3 median (IQM, 95 % CI) | realistic S3 <= 10 / 20 km | VISTA S3 | SCVX ic_tc / models | feasible (real. S3) |
+|---|---|---|---|---|---|---|---|
+| v21 best 15.1M | 16.2 km | 21.9 | 103 (109, [99, 121]) | — | 782 | 264 / 795 | 39 % |
+| v21 best 29.2M | **10.1 km** | **16.0** | 108 (110, [100, 120]) | 1.6 % / 9.4 % | 946 | 260 / 983 | 48 % |
+| v21 final 30M | 11.5 km | 16.0 | 96 (108, [98, 119]) | — | — | — | 40 % |
+
+Nominal precision improves with training; robustness does not (nominal-only training):
+the realistic-dispersion IQM is unchanged at ~109 km. Largest one-at-a-time
+sensitivities (realistic +-3 sigma): C_L 310 km, C_D 294 km, entry speed 101 km.
