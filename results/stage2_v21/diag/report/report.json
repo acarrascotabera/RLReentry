@@ -1,0 +1,114 @@
+{
+ "run": "stage2_v21",
+ "timesteps_config": 20000000,
+ "steps_evaluated": 20000000,
+ "n_validations": 200,
+ "best_by_score": {
+  "step": 15100000,
+  "d_km": 16.18,
+  "dfpa_deg": -14.211,
+  "dpsi_deg": -58.325,
+  "peak_ratio": 0.9939,
+  "alpha_std_deg": 0.0,
+  "score": 24.491
+ },
+ "last": {
+  "step": 20000000,
+  "d_km": 98.475,
+  "dfpa_deg": -14.335,
+  "dpsi_deg": -84.97,
+  "peak_ratio": 0.9903,
+  "alpha_std_deg": 0.0,
+  "score": 100.954
+ },
+ "best_feasible_d": {
+  "step": 15100000,
+  "d_km": 16.18,
+  "dfpa_deg": -14.211,
+  "dpsi_deg": -58.325,
+  "peak_ratio": 0.9939,
+  "alpha_std_deg": 0.0,
+  "score": 24.491
+ },
+ "milestones_feasible_first_step": {
+  "d<100km": 2100000,
+  "d<50km": 2300000,
+  "d<20km": 15100000,
+  "d<10km": null,
+  "d<5km": null,
+  "d<1km": null
+ },
+ "regimes": {
+  "modulated_feasible": {
+   "fraction": 0.17,
+   "median_d_km": 54.2,
+   "min_d_km": 24.3,
+   "median_peak_ratio": 0.997
+  },
+  "modulated_over_limit": {
+   "fraction": 0.19,
+   "median_d_km": 76.2,
+   "min_d_km": 42.4,
+   "median_peak_ratio": 1.385
+  },
+  "locked_feasible": {
+   "fraction": 0.515,
+   "median_d_km": 156.7,
+   "min_d_km": 16.2,
+   "median_peak_ratio": 0.99
+  },
+  "locked_over_limit": {
+   "fraction": 0.125,
+   "median_d_km": 91.5,
+   "min_d_km": 36.6,
+   "median_peak_ratio": 1.163
+  }
+ },
+ "regime_switches": 30,
+ "spearman": {
+  "d_vs_peak_ratio": -0.186,
+  "d_vs_alpha_std": -0.39
+ },
+ "trend_last_window": {
+  "window_steps": 2000000,
+  "log10_d_slope_per_M": -0.0356,
+  "steps_since_best": 4900000,
+  "return_slope_per_M": 5.36
+ },
+ "return": {
+  "first": 723.0,
+  "max": 783.0,
+  "last_window_median": -151.5
+ },
+ "ppo_health": {
+  "approx_kl": {
+   "median": 0.0022697095,
+   "p95": 0.0035950369800000007,
+   "max": 0.06035186,
+   "min": 1.1836799e-05
+  },
+  "explained_variance": {
+   "median": 0.999,
+   "p95": 1.0,
+   "max": 1.0,
+   "min": 0.744
+  },
+  "value_loss": {
+   "median": 15.5,
+   "p95": 249.80000000000018,
+   "max": 5380.0,
+   "min": 2.47
+  },
+  "clip_fraction": {
+   "median": 0.0334,
+   "p95": 0.05562,
+   "max": 0.0999,
+   "min": 0.0
+  },
+  "updates_kl_over_1p5_target": 0
+ },
+ "curriculum": {
+  "final_level": 0,
+  "advances": []
+ }
+}

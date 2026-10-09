@@ -727,3 +727,33 @@ Command: `train_sb3 --stage stage2 --timesteps 20000000 --n-envs 8
 --target-kl 0.05 --w-succ 500 --succ-ramp-km 6 --set-weight w_peak=200 --set-weight w_far=2
 --curriculum v20r --val-set S0_nominal --score-mode full --eval-freq 100000 --ckpt-freq 500000
 --save-below 5 --seed 0 --outdir results/stage2_v21`
+
+**v21 outcome — done (20M, 2026-10-09 08:34).** Report: `results/stage2_v21/diag/report/`
+(learning_curves.png, regimes.png, report.json); chains: `results/curves/`.
+
+| | nominal d | realistic sweep median | realistic S3 median (IQM, 95 % CI) | VISTA S3 median | SCVX ic_tc / models median | feasible (realistic S3) |
+|---|---|---|---|---|---|---|
+| v21 best (15.1M) | **16.2 km** | 21.9 km | 103 km (109, [99, 121]) | 782 km | 264 / 795 km | 39 % |
+| v21 final (20M) | 98.6 km | 102 km | 185 km (194, [182, 208]) | — | — | 69 % |
+| v20d best | 88.0 km | 87.6 km | 114 km (116, [109, 124]) | 702 km | 256 / 741 km | 15 % |
+| SCvx G&C | 0.016 km | — | — | — | 0.21 / 0.33 km | — |
+
+Training analysis:
+1. Longer training helped, slowly: feasible d < 100 km at 2.1M, < 50 km at 2.3M, < 20 km
+   only at 15.1M (16.2 km, best under the corrected dynamics); never < 10 km; drifted to
+   99 km by 20M as the lr decayed. Curriculum never left the position-only level.
+2. Optimisation was healthy: approx_kl median 0.0023 (no target_kl hits), explained
+   variance ~1 after 3M, and the training return tracks the deterministic landing error
+   (Spearman -0.85). No reward/objective mismatch and no collapse; the late drift is
+   PPO's own objective falling.
+3. **AoA is effectively disabled.** In the 12.5M, best and final policies alpha sits at
+   40 deg for 98.5-100 % of the steps; the raw AoA-rate mean at the limit is +0.38..+0.43
+   (~3 std into the bound), so a negative rate is explored with p ~ 0.3 %/step, and the
+   saturated integrator gives the pinned command zero effect and zero gradient. The
+   "modulated" regime is only a terminal AoA dive (~1.5 % of the flight). v21 flies
+   bank-only; SCvx modulates AoA (28 deg at the handover), and the July 0.27 km
+   relied on the hidden >40 deg AoA channel.
+4. Near-target feasible rollouts ride the constraint boundary (peak ratio 0.99-1.00):
+   the fixed penalty weights decide the margin (19 % of evaluations over the limit).
+5. Nominal-only training does not transfer: the nominal gain (88 -> 16 km) leaves the
+   realistic-dispersion median at ~100 km and the SCvx scenarios at 264-795 km.
