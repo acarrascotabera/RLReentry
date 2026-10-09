@@ -116,6 +116,9 @@ def parse_args():
                          "(e.g. 0.02,0.15 to re-open AoA exploration on a bank-converged policy)")
     ap.add_argument("--tb", action="store_true", help="enable TensorBoard logging (off by default; flaky on Windows)")
     ap.add_argument("--resume", default=None, help="resume from the latest checkpoint in this run dir (continues in place)")
+    ap.add_argument("--lr-restart", action="store_true",
+                    help="with --resume --lr-decay: restart the LR at lr_base and decay it to 0 over the "
+                         "--timesteps of this segment (warm restart) instead of continuing the old decay")
     return ap.parse_args()
 
 
@@ -239,10 +242,23 @@ def main():
     if args.resume:
         model = PPO.load(str(resume_ckpt), env=venv, device="cpu", tensorboard_log=tb_log)
         if args.lr_decay:
-            model.lr_schedule = linear_schedule(lr_base)
+            if args.lr_restart:
+                # SB3 progress_remaining runs p0 -> 0 over this segment (total = done + new)
+                p0 = 1.0 - model.num_timesteps / float(model.num_timesteps + args.timesteps)
+                model.lr_schedule = lambda progress_remaining: lr_base * max(progress_remaining, 0.0) / p0
+            else:
+                model.lr_schedule = linear_schedule(lr_base)
         if args.ent_coef is not None:
             model.ent_coef = args.ent_coef
-        print(f"[resume] loaded {resume_ckpt.name} at num_timesteps={model.num_timesteps:,} -> target {args.timesteps:,}")
+        seg = {"resumed_from": resume_ckpt.name, "at_steps": int(model.num_timesteps),
+               "extra_steps": int(args.timesteps), "lr_restart": bool(args.lr_restart),
+               "lr_at_resume": float(model.lr_schedule(1.0 - model.num_timesteps / float(model.num_timesteps + args.timesteps))),
+               "started": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        log = outdir / "resume_log.json"
+        hist = json.loads(log.read_text()) if log.exists() else []
+        log.write_text(json.dumps(hist + [seg], indent=1))
+        print(f"[resume] loaded {resume_ckpt.name} at num_timesteps={model.num_timesteps:,} -> "
+              f"+{args.timesteps:,} steps (lr at resume {seg['lr_at_resume']:.2e})")
     elif args.init_model:
         # Warm start: keep the source model's hyperparameters except the explicit
         # CLI overrides (the point is usually a gentler polish: lower lr/clip).
