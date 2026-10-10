@@ -1,0 +1,11 @@
+{
+ "preset": "v20r",
+ "level": 0,
+ "level_start": 0,
+ "step": 2000000,
+ "params": {
+  "w_succ_fpa": 0.0,
+  "w_succ_psi": 0.0,
+  "w_ang_mult": 0.0
+ }
+}

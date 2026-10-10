@@ -1,0 +1,13 @@
+{
+ "preset": "v20",
+ "level": 0,
+ "level_start": 0,
+ "step": 600000,
+ "params": {
+  "w_succ_fpa": 250.0,
+  "w_succ_psi": 250.0,
+  "w_ang_mult": 0.25,
+  "fpa_ramp_deg": 20.0,
+  "psi_ramp_deg": 90.0
+ }
+}

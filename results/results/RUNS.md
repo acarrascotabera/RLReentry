@@ -782,3 +782,16 @@ channels never active (5 km gate not reached): dfpa ~14 deg, dpsi 56-84 deg.
 Nominal precision improves with training; robustness does not (nominal-only training):
 the realistic-dispersion IQM is unchanged at ~109 km. Largest one-at-a-time
 sensitivities (realistic +-3 sigma): C_L 310 km, C_D 294 km, entry speed 101 km.
+
+### v22 — running (launched 2026-10-10 17:09): +10M steps, LR restart, training dispersions
+
+Warm start from the v21 final model (30M, nominal 11.5 km; copied to
+results/stage2_v22_init/). Same reward (w_far 2, w_peak 200, w_succ 500 / 6 km) and
+curriculum v20r (restarts at the position-only level), PPO lr 1e-4 decayed to 0 over the
+10M (the LR warm restart), clip 0.15, target_kl 0.05, learned action std kept.
+New: **domain randomization** — every training episode draws a realistic dispersion
+(`--train-dispersion ic,models --train-sigma-scale 0.1`: entry state + mass/C_L/C_D/density
+at 0.1x the VISTA sigmas, the distribution of S2_val_x0.1 / S3_test_ic_models_x0.1).
+Selection on **S2_val_x0.1** (nominal + 15 realistic dispersions, p90 of the full-error
+score) every 250k steps (16 rollouts per evaluation). New run directory because the
+selection criterion changed (v21 best.json is a nominal-only score). 414 steps/s.
