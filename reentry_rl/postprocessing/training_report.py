@@ -13,10 +13,12 @@ eval/curriculum.csv and best/best.json, and writes to <run>/diag/report/:
   report.json          best/last evaluations, milestone steps, regime statistics,
                        stagnation trends, PPO health
 
-Flight regimes (deterministic nominal rollout at each validation):
+Flight regimes (deterministic rollouts at each validation):
   modulated  AoA spread > 1 deg along the trajectory
   locked     AoA held (spread <= 1 deg; in practice at the 40 deg limit)
-crossed with feasibility (peak ratio <= 1.02, the selection-score margin).
+crossed with feasibility: peak ratio <= 1.02 (the selection-score margin) for a
+single-scenario validation set; for a multi-scenario set (e.g. S2_val_x0.1) at least
+90 % of the cases strictly within the limits.
 
     python -m reentry_rl.postprocessing.training_report --run results/stage2_v21
 """
@@ -68,7 +70,8 @@ def load(run):
     cfg = json.loads((run / "config.json").read_text())
     vh = pd.read_csv(run / "eval" / "validation_history.csv")
     vh["modulated"] = vh["alpha_std_mean"] > ALPHA_MOD_DEG
-    vh["feasible"] = vh["max_ratio_max"] <= FEAS
+    multi = int(vh["n"].max()) > 1
+    vh["feasible"] = (vh["feasible_rate"] >= 0.9) if multi else (vh["max_ratio_max"] <= FEAS)
     cur = pd.read_csv(run / "eval" / "curriculum.csv") if (run / "eval" / "curriculum.csv").exists() else None
     recs = []                       # train_log.txt + train_log_resume*.txt, in order
     for log in [run / "train_log.txt"] + sorted(run.glob("train_log_resume*.txt")):
@@ -80,7 +83,7 @@ def load(run):
 
 def learning_curves(run, vh, cur, recs, path):
     s = vh["step"].to_numpy() / 1e6
-    fig, axes = plt.subplots(5, 2, figsize=(13, 15), facecolor=SURFACE)
+    fig, axes = plt.subplots(6, 2, figsize=(13, 18), facecolor=SURFACE)
     ax = axes.ravel()
 
     def regime_points(a, y, logy=False):
@@ -93,15 +96,17 @@ def learning_curves(run, vh, cur, recs, path):
                 plot(s[m], y[m], mk, color=col, ms=4 if feas else 5, label=lbl, zorder=2)
 
     regime_points(ax[0], vh["nominal_d_km"].to_numpy(), logy=True)
+    if int(vh["n"].max()) > 1:
+        ax[0].semilogy(s, vh["d_km_median"], "-", color=INK2, lw=1.4, label="validation-set median")
     ax[0].axhline(5.0, color=INK2, lw=0.8, ls="--")
     ax[0].text(s[-1], 5.0, " 5 km (curriculum)", fontsize=7, color=INK2, va="bottom", ha="right")
-    ax[0].set_title("nominal landing error [km]", fontsize=9, loc="left")
+    ax[0].set_title("landing error [km]: nominal case (markers), validation-set median (line)", fontsize=9, loc="left")
     ax[0].legend(fontsize=7, frameon=False, ncol=2, loc="upper right", labelcolor=INK)
 
     regime_points(ax[1], vh["max_ratio_max"].to_numpy())
     ax[1].axhline(1.0, color=INK2, lw=0.8, ls="--")
     ax[1].axhline(FEAS, color=INK2, lw=0.6, ls=":")
-    ax[1].set_title("peak path-constraint ratio (dashed: limit, dotted: 2 % margin)", fontsize=9, loc="left")
+    ax[1].set_title("peak path-constraint ratio, worst validation case (dashed: limit, dotted: 2 %)", fontsize=9, loc="left")
 
     regime_points(ax[2], vh["nominal_dfpa_deg"].abs().to_numpy())
     ax[2].set_title("|FPA error| at handover [deg]", fontsize=9, loc="left")
@@ -121,11 +126,15 @@ def learning_curves(run, vh, cur, recs, path):
     for a, key, title, logy in ((ax[6], "approx_kl", "approx KL per update (log)", True),
                                 (ax[7], "explained_variance", "explained variance of the value function", False),
                                 (ax[8], "value_loss", "value loss (log)", True),
-                                (ax[9], "learning_rate", "learning rate", False)):
+                                (ax[9], "learning_rate", "learning rate", False),
+                                (ax[11], "std", "policy std (mean over actions)", False)):
         t, v = series(recs, key)
         if t.size:
             (a.semilogy if logy else a.plot)(t / 1e6, v, color=C_MOD, lw=0.8)
         a.set_title(title, fontsize=9, loc="left")
+    ax[10].plot(s, vh["feasible_rate"], "o-", color=C_MOD, ms=3, lw=0.8)
+    ax[10].set_ylim(-0.05, 1.05)
+    ax[10].set_title("fraction of validation cases strictly within the path limits", fontsize=9, loc="left")
     tk = (series(recs, "target_kl")[1] if series(recs, "target_kl")[0].size else None)
     if cur is not None and (cur["advanced"] == True).any():          # noqa: E712
         for st in cur.loc[cur["advanced"] == True, "step"]:         # noqa: E712
