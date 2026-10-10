@@ -31,9 +31,10 @@ results/**
 !results/**/evaluations.npz
 !results/**/study.db
 !results/**/eval/**
-!results/**/eval_*/**
+!results/**/eval_mc*/**
+!results/**/eval_legacy*/**
 results/**/eval/**/*.png
 results/**/eval/**/*.svg
-results/**/eval_*/**/*.png
-results/**/eval_*/**/*.svg
+results/**/eval_mc*/**/*.png
+results/**/eval_mc*/**/*.svg
 !results/scvx_mc/**

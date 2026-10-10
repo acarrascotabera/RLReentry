@@ -69,6 +69,11 @@ def parse_args():
     ap.add_argument("--save-below", type=float, default=None,
                     help="also snapshot every model whose validation score is below this")
     ap.add_argument("--obs-version", default=None, help="observation layout (default: env default)")
+    ap.add_argument("--train-dispersion", default=None,
+                    help="domain randomization during training: comma-separated scenario groups "
+                         "(ic, tc, models), a new draw at every episode reset")
+    ap.add_argument("--train-sigma-scale", type=float, default=1.0,
+                    help="scale of the VISTA dispersion sigmas/clips for --train-dispersion (0.1 = realistic)")
     ap.add_argument("--set-weight", action="append", default=[], metavar="KEY=VALUE",
                     help="override any RewardWeights field (repeatable), e.g. w_ang_mult=0.25")
     ap.add_argument("--curriculum", default=None, choices=sorted(PRESETS),
@@ -211,8 +216,16 @@ def main():
         print(f"[curriculum] {args.curriculum} level {curriculum.level}: {curriculum.params()}")
 
     # Vectorized training env + a single-env eval env (EvalCallback syncs VecNormalize stats).
+    train_env_kwargs = dict(env_kwargs)
+    sampler = None
+    if args.train_dispersion:
+        from reentry_rl.envs.scenario import ScenarioSampler
+        sampler = ScenarioSampler(tuple(g.strip() for g in args.train_dispersion.split(",")),
+                                  args.train_sigma_scale)
+        train_env_kwargs["scenario_sampler"] = sampler
+        print(f"[dispersion] training on {sampler.describe()}")
     venv = build_vecenv(env_cls, args.n_envs, weights, args.n_substeps, args.seed, subproc,
-                        env_kwargs)
+                        train_env_kwargs)
     if args.resume:                         # restore observation/return normalization stats
         from stable_baselines3.common.vec_env import VecNormalize
         venv = VecNormalize.load(str(resume_vn), venv.venv)
@@ -299,6 +312,7 @@ def main():
             "net_arch": model.policy.net_arch,       # the model's real architecture
             "action_std": args.action_std,
             "env_kwargs": env_kwargs, "val_set": val_name, "score_mode": args.score_mode,
+            "train_dispersion": (None if sampler is None else sampler.describe()),
             "curriculum": (None if curriculum is None else
                            {"preset": args.curriculum, "min_steps": args.curriculum_min_steps,
                             "pass_frac": args.curriculum_pass_frac, "levels": curriculum.levels,

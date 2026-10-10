@@ -122,17 +122,30 @@ def sweep_scenarios(groups=("ic", "tc", "models"), multipliers=(-3, -2, -1, 1, 2
     return out
 
 
-def sampler(groups=("ic", "models"), sigma_scale=1.0):
-    """Callable rng -> Scenario, for training-time domain randomization."""
-    names = _params(groups)
+class ScenarioSampler:
+    """Callable rng -> Scenario for training-time domain randomization (picklable,
+    so it can be handed to SubprocVecEnv workers through env_kwargs). Each env draws
+    a new scenario at every reset from its own seeded rng."""
 
-    def _draw(rng):
+    def __init__(self, groups=("ic", "models"), sigma_scale=1.0):
+        self.groups = tuple(groups)
+        self.sigma_scale = float(sigma_scale)
+        self.names = _params(self.groups)
+
+    def __call__(self, rng):
         vals = {}
-        for k in names:
-            mean, sigma, lo, hi = _scaled(k, sigma_scale)
+        for k in self.names:
+            mean, sigma, lo, hi = _scaled(k, self.sigma_scale)
             vals[k] = float(np.clip(rng.normal(mean, sigma), lo, hi))
         return replace(NOMINAL, **vals)
-    return _draw
+
+    def describe(self):
+        return {"groups": list(self.groups), "sigma_scale": self.sigma_scale}
+
+
+def sampler(groups=("ic", "models"), sigma_scale=1.0):
+    """Callable rng -> Scenario, for training-time domain randomization."""
+    return ScenarioSampler(groups, sigma_scale)
 
 
 # ---------------------------------------------------------------------------
