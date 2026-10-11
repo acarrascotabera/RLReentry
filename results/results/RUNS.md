@@ -795,3 +795,23 @@ at 0.1x the VISTA sigmas, the distribution of S2_val_x0.1 / S3_test_ic_models_x0
 Selection on **S2_val_x0.1** (nominal + 15 realistic dispersions, p90 of the full-error
 score) every 250k steps (16 rollouts per evaluation). New run directory because the
 selection criterion changed (v21 best.json is a nominal-only score). 414 steps/s.
+
+**v22 outcome — done (10M, 2026-10-11 01:24).** Best (selection on S2_val_x0.1) at 9.75M:
+validation median 26 km, 75 % of cases within limits. Training return -65 -> +600 monotone,
+policy std annealed 0.087 -> 0.072, approx_kl median 0.003, explained variance >= 0.99.
+Figures: results/stage2_v22/diag/report/, results/curves/mc_comparison.png.
+
+| | nominal | realistic S3 median (IQM, 95 % CI) | <= 20 / 50 km | peak ratio p95 | feasible | VISTA S3 | SCVX ic_tc / models |
+|---|---|---|---|---|---|---|---|
+| v21 best (nominal training) | 10.1 | 108 (110, [100, 120]) | 9 % / 27 % | 2.04 | 48 % | 946 | 260 / 983 |
+| **v22 best** (dispersion training) | 21.4 | **24.0 (25.1, [23.9, 26.7])** | 31 % / 83 % | **1.11** | **68 %** | 494 | 155 / 534 |
+| v22 final | 16.0 | 20.3 (20.9, [20.1, 22.0]) | 48 % / 88 % | 1.23 | 41 % | 501 | — |
+| SCvx G&C | 0.016 | — | — | — | — | — | 0.21 / 0.33 |
+
+Training with realistic dispersions cut the realistic-test IQM 4.4x (110 -> 25 km) and
+the worst-case constraint excess (p95 2.04 -> 1.11), at the cost of nominal precision
+(10 -> 16-21 km). It also halved the error on the stress-level VISTA/SCvx scenarios it
+never saw, which remain 2-3 orders above SCvx. The v22 CDFs start at ~14 km: no
+realistic case lands closer, a precision floor of the bank-only policy (alpha at 40 deg
+throughout). Best (selected for feasibility) vs final (more accurate, less feasible)
+is the position / constraint-margin trade-off again.
