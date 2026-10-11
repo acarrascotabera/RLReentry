@@ -815,3 +815,20 @@ never saw, which remain 2-3 orders above SCvx. The v22 CDFs start at ~14 km: no
 realistic case lands closer, a precision floor of the bank-only policy (alpha at 40 deg
 throughout). Best (selected for feasibility) vs final (more accurate, less feasible)
 is the position / constraint-margin trade-off again.
+
+### v23 — running (launched 2026-10-11 23:07): points B + C
+
+Warm start from the v22 final model (10M; nominal 16.0 km, realistic S3 median 20.3 km,
+41 % feasible), +10M steps with the LR restarted at 1e-4, same dispersion training
+(ic+models, 0.1x VISTA) and selection (S2_val_x0.1, full score, every 250k).
+- **B — angles earlier:** curriculum `v23`. The position-only level hands over once
+  >= 50 % of the validation cases land within 30 km (and within the 2 % constraint
+  margin); each angle level carries its own position criterion (30, 25, 20, 10, 5, 2 km)
+  so the angle tolerances can tighten while the landing error is still tens of km.
+- **C — PID-Lagrangian path constraints:** `--lagrangian` (training/lagrangian.py).
+  E[max(0, peak_k/limit_k - 1)] <= 0.005 for heat rate, dynamic pressure and load
+  factor, one multiplier per constraint on the episode peak excess (replaces w_peak),
+  updated after every rollout: Kp 2000, Ki 1000, Kd 0, lam_init 200 (= the previous fixed
+  w_peak), lam_max 2000. The per-step barrier is kept.
+First rollout: load-factor and heat-rate overshoot in 12 % of the training episodes ->
+lam_n 208, lam_Qdot 192.
