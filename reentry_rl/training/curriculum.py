@@ -21,6 +21,13 @@ while the level-0 heading bonus pays ~4.3/deg, so v20b traded position for
 heading (308 -> 349 km while dpsi 77 -> 65 deg). Level keys starting with "_"
 are curriculum metadata (pass criteria), not reward weights.
 
+Preset "v23" (point B) switches the angle channels on early: the position-only
+level hands over once >= 50 % of the validation cases land within 30 km, and
+every angle level carries its own position criterion (30 -> 2 km) so the
+curriculum can tighten the angles while the landing error is still tens of km
+(the v20 levels required d <= 2 km at every level). Built for a dispersed
+validation set (S2_val_x0.1), hence the 50 % pass fraction (key "_pass_frac").
+
 Weights are pushed to every training env with env_method("set_reward_params")
 and take effect at each env's next reset. The level history is written to
 <run>/eval/curriculum.csv and the current level to <run>/curriculum_state.json
@@ -43,6 +50,15 @@ PRESETS = {
             {"w_ang_mult": 1.00, "fpa_ramp_deg": 0.1, "psi_ramp_deg": 0.5},
         ]),
 }
+_V23 = [  # (w_ang_mult, fpa_ramp, psi_ramp, d_pass_km)
+    (0.25, 20.0, 90.0, 30.0), (0.50, 10.0, 45.0, 25.0), (1.00, 5.0, 20.0, 20.0),
+    (1.00, 2.0, 8.0, 10.0), (1.00, 0.5, 2.0, 5.0), (1.00, 0.1, 0.5, 2.0)]
+PRESETS["v23"] = dict(
+    base=dict(PRESETS["v20"]["base"]),
+    levels=[{"w_ang_mult": 0.0, "w_succ_fpa": 0.0, "w_succ_psi": 0.0,
+             "_d_pass_km": 30.0, "_check_angles": False, "_pass_frac": 0.5}]
+           + [{"w_ang_mult": c, "fpa_ramp_deg": f, "psi_ramp_deg": q, "w_succ_fpa": 250.0,
+               "w_succ_psi": 250.0, "_d_pass_km": d, "_pass_frac": 0.5} for c, f, q, d in _V23])
 PRESETS["v20r"] = dict(
     base=dict(PRESETS["v20"]["base"]),
     levels=[{"w_ang_mult": 0.0, "w_succ_fpa": 0.0, "w_succ_psi": 0.0,
@@ -109,7 +125,8 @@ class TerminalCurriculum:
         """ValidationCallback listener: maybe advance, then push weights."""
         step = int(callback.num_timesteps)
         frac = self.passed(df)
-        self.streak = self.streak + 1 if frac >= self.pass_frac else 0
+        need = self.levels[self.level].get("_pass_frac", self.pass_frac)
+        self.streak = self.streak + 1 if frac >= need else 0
         advanced = False
         if (self.streak >= self.patience and step - self.level_start >= self.min_steps
                 and self.level < len(self.levels) - 1):

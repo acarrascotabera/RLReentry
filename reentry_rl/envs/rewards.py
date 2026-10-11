@@ -116,6 +116,10 @@ class RewardWeights:
                             # The capped per-step barrier makes a short extreme violation
                             # cheap: v20c dove the last 17 s at q-bar = 3.5x the limit for
                             # <= 51 units. Charged once, like the chatter mean (rule 2).
+    lam_Qdot: float = 0.0   # per-constraint Lagrange multipliers on the episode's peak
+    lam_qbar: float = 0.0   # excess, -lam_k * max(0, peak_k/limit_k - 1) on every ending.
+    lam_n: float = 0.0      # Set by training/lagrangian.py (PID dual ascent on the measured
+                            # violation of the training episodes) instead of a fixed w_peak.
     # ---- tier 1b: terminal FPA and heading (0 = position-only reward of v1-v19) ----
     w_ang_mult: float = 0.0     # curriculum multiplier c on both angle anchors + shaping
     fpa_lin_deg: float = 2.0    # gamma well: pen(fpa_lin) = w_fpa_lin * fpa_lin = 200

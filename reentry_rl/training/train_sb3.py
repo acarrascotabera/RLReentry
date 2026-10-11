@@ -37,6 +37,7 @@ from reentry_rl.training.common import (ENV_CLASSES, J_REF, ensure_child_importa
                                         load_validation_set, set_action_std)
 from reentry_rl.envs.rewards import RewardWeights
 from reentry_rl.training.curriculum import PRESETS, TerminalCurriculum
+from reentry_rl.training.lagrangian import PIDLagrangianCallback
 
 # Manual defaults — these become the Optuna HPO search seed (milestone 2b).
 DEFAULT_PPO = dict(
@@ -79,6 +80,16 @@ def parse_args():
     ap.add_argument("--curriculum", default=None, choices=sorted(PRESETS),
                     help="terminal-tolerance curriculum on the FPA/heading reward channels")
     ap.add_argument("--curriculum-min-steps", type=int, default=300_000)
+    ap.add_argument("--lagrangian", action="store_true",
+                    help="PID-Lagrangian path constraints: per-constraint multipliers on the episode "
+                         "peak excess, adapted after every rollout (replaces w_peak)")
+    ap.add_argument("--lag-budget", type=float, default=0.005,
+                    help="allowed mean peak excess per constraint (0.005 = 0.5 %% overshoot on average)")
+    ap.add_argument("--lag-kp", type=float, default=2000.0)
+    ap.add_argument("--lag-ki", type=float, default=1000.0)
+    ap.add_argument("--lag-kd", type=float, default=0.0)
+    ap.add_argument("--lag-init", type=float, default=200.0, help="initial multiplier (= previous fixed w_peak)")
+    ap.add_argument("--lag-max", type=float, default=2000.0, help="multiplier cap (bounds the return scale)")
     ap.add_argument("--curriculum-pass-frac", type=float, default=0.75)
     ap.add_argument("--legacy-terminal", action="store_true",
                     help="terminal state at the first step below 25 km instead of the exact crossing")
@@ -215,6 +226,16 @@ def main():
         curriculum.apply_to(weights)          # envs start at the current level
         print(f"[curriculum] {args.curriculum} level {curriculum.level}: {curriculum.params()}")
 
+    lagrange = None
+    if args.lagrangian:
+        lagrange = PIDLagrangianCallback(outdir, budget=args.lag_budget, kp=args.lag_kp, ki=args.lag_ki,
+                                         kd=args.lag_kd, lam_init=args.lag_init, lam_max=args.lag_max)
+        if args.resume:
+            lagrange.restore()
+        weights.w_peak = 0.0                  # the multipliers replace the fixed peak charge
+        lagrange.apply_to(weights)
+        print(f"[lagrange] PID multipliers {lagrange.params()} budget {args.lag_budget}")
+
     # Vectorized training env + a single-env eval env (EvalCallback syncs VecNormalize stats).
     train_env_kwargs = dict(env_kwargs)
     sampler = None
@@ -245,6 +266,8 @@ def main():
                                 set_name=val_name, verbose=1)
     if curriculum is not None:
         val_cb.listeners.append(curriculum.on_validation)
+    if lagrange is not None:
+        lagrange.weights, lagrange.val_callback = weights, val_cb
     if args.resume and (outdir / "best" / "best.json").exists():
         # keep the pre-resume best (EvalCallback used to forget it and overwrite best/)
         val_cb.best = float(json.load(open(outdir / "best" / "best.json"))["score"])
@@ -313,6 +336,9 @@ def main():
             "action_std": args.action_std,
             "env_kwargs": env_kwargs, "val_set": val_name, "score_mode": args.score_mode,
             "train_dispersion": (None if sampler is None else sampler.describe()),
+            "lagrangian": (None if lagrange is None else
+                           {"budget": args.lag_budget, "kp": args.lag_kp, "ki": args.lag_ki,
+                            "kd": args.lag_kd, "lam_init": args.lag_init, "lam_max": args.lag_max}),
             "curriculum": (None if curriculum is None else
                            {"preset": args.curriculum, "min_steps": args.curriculum_min_steps,
                             "pass_frac": args.curriculum_pass_frac, "levels": curriculum.levels,
@@ -324,7 +350,8 @@ def main():
           f"subproc={subproc} substeps={args.n_substeps} -> {outdir}")
     t0 = time.time()
     model.learn(total_timesteps=args.timesteps, reset_num_timesteps=not bool(args.resume),
-                callback=[val_cb, ckpt_cb], progress_bar=False)
+                callback=[val_cb, ckpt_cb] + ([lagrange] if lagrange is not None else []),
+                progress_bar=False)
     train_s = time.time() - t0
 
     model.save(str(outdir / "model.zip"))

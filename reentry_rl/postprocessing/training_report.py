@@ -183,6 +183,36 @@ def regimes_figure(run, vh, path):
     _ = code
 
 
+def lagrange_figure(run, path):
+    """PID-Lagrangian history: mean peak excess J_k vs budget and multipliers lam_k."""
+    f = run / "eval" / "lagrange.csv"
+    if not f.exists():
+        return False
+    lg = pd.read_csv(f)
+    cols = {"Qdot": C_MOD, "qbar": C_LOCK, "n": "#1baf7a"}
+    names = {"Qdot": "heat rate", "qbar": "dynamic pressure", "n": "load factor"}
+    fig, (a, b) = plt.subplots(1, 2, figsize=(13, 4.5), facecolor=SURFACE)
+    for k, c in cols.items():
+        a.plot(lg["step"] / 1e6, pd.Series(lg[f"J_{k}"]).rolling(5, min_periods=1).mean(), color=c, lw=1.4,
+               label=names[k])
+        b.plot(lg["step"] / 1e6, lg[f"lam_{k}"], color=c, lw=1.4, label=names[k])
+    cfg = json.loads((run / "config.json").read_text()).get("lagrangian") or {}
+    if "budget" in cfg:
+        a.axhline(cfg["budget"], color=INK2, lw=0.8, ls="--")
+        a.text(lg["step"].iloc[0] / 1e6, cfg["budget"], " budget", fontsize=7, color=INK2, va="bottom")
+    a.set_title("mean peak excess of the training episodes (rolling 5 rollouts)", fontsize=9, loc="left")
+    b.set_title("Lagrange multipliers", fontsize=9, loc="left")
+    for ax in (a, b):
+        _style(ax)
+        ax.set_xlabel("training steps [M]", fontsize=8)
+        ax.legend(fontsize=8, frameon=False, labelcolor=INK)
+    fig.suptitle(f"{run.name}: PID-Lagrangian path constraints", fontsize=11, color=INK, x=0.01, ha="left")
+    fig.tight_layout(rect=[0, 0, 1, 0.94])
+    fig.savefig(path, dpi=140, facecolor=SURFACE)
+    plt.close(fig)
+    return True
+
+
 def _row(vh, i):
     r = vh.loc[i]
     return {"step": int(r["step"]), "d_km": round(float(r["nominal_d_km"]), 3),
@@ -256,6 +286,7 @@ def main():
     out.mkdir(parents=True, exist_ok=True)
     learning_curves(run, vh, cur, recs, out / "learning_curves.png")
     regimes_figure(run, vh, out / "regimes.png")
+    lagrange_figure(run, out / "lagrange.png")
     rep = build_report(run, cfg, vh, cur, recs, best, args.window)
     (out / "report.json").write_text(json.dumps(rep, indent=1))
     print(json.dumps(rep, indent=1))

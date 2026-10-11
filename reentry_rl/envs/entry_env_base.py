@@ -291,6 +291,7 @@ class EntryEnvBase(gym.Env):
         self._chatter = 0.0
         self._prev_G = self._angle_potential()
         self._peak_ratio = 0.0
+        self._peaks = {"Qdot": 0.0, "qbar": 0.0, "n": 0.0}
         return self._obs(), self._info()
 
     def step(self, action):
@@ -349,8 +350,11 @@ class EntryEnvBase(gym.Env):
                     + path_barrier(c["qbar"] / C.QBAR_MAX, w.path_soft)
                     + path_barrier(c["n"] / C.N_MAX, w.path_soft))
         r -= w.w_path * min(bar, w.path_cap)
-        self._peak_ratio = max(self._peak_ratio, c["Qdot"] / C.QDOT_MAX,
-                               c["qbar"] / C.QBAR_MAX, c["n"] / C.N_MAX)
+        pk = self._peaks
+        pk["Qdot"] = max(pk["Qdot"], c["Qdot"] / C.QDOT_MAX)
+        pk["qbar"] = max(pk["qbar"], c["qbar"] / C.QBAR_MAX)
+        pk["n"] = max(pk["n"], c["n"] / C.N_MAX)
+        self._peak_ratio = max(pk.values())
 
         terminated = truncated = False
         tinfo = {}
@@ -390,7 +394,12 @@ class EntryEnvBase(gym.Env):
             tinfo["chatter_mean"] = chatter_mean
             # worst path-constraint excess of the episode, charged once on every ending
             r -= w.w_peak * max(0.0, self._peak_ratio - 1.0)
+            # per-constraint Lagrangian terms (multipliers adapted during training)
+            pk = self._peaks
+            r -= (w.lam_Qdot * max(0.0, pk["Qdot"] - 1.0) + w.lam_qbar * max(0.0, pk["qbar"] - 1.0)
+                  + w.lam_n * max(0.0, pk["n"] - 1.0))
             tinfo["peak_ratio"] = self._peak_ratio
+            tinfo["peak_Qdot"], tinfo["peak_qbar"], tinfo["peak_n"] = pk["Qdot"], pk["qbar"], pk["n"]
             terr = self._terminal_errors()
             tinfo.update(terr)
             # tier 1b anchors: uniform on every ending, like the position anchor
