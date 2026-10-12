@@ -27,7 +27,8 @@ INK, INK2, GRID, SURFACE = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
 
 POLICIES = [("v21 best (nominal training, 29.2M)", RES / "stage2_v21/eval_mc_best_29p2M"),
             ("v22 best (dispersion training)", RES / "stage2_v22/eval_mc_best"),
-            ("v22 final", RES / "stage2_v22/eval_mc_final")]
+            ("v23 best (+ Lagrangian, early angles)", RES / "stage2_v23/eval_mc_best"),
+            ("v23 final", RES / "stage2_v23/eval_mc_final")]
 
 
 def _cdf(ax, d, color, label, ls="-"):

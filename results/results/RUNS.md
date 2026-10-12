@@ -832,3 +832,25 @@ Warm start from the v22 final model (10M; nominal 16.0 km, realistic S3 median 2
   w_peak), lam_max 2000. The per-step barrier is kept.
 First rollout: load-factor and heat-rate overshoot in 12 % of the training episodes ->
 lam_n 208, lam_Qdot 192.
+
+**v23 outcome — done (10M, 2026-10-12 06:25).** Best by score at 8.75M (all 16 validation
+cases within 1.9 % of the limits); final 5.0 km nominal. Training return 511 -> ~930,
+approx_kl median 0.0046, explained variance >= 0.97, policy std 0.072 -> 0.063.
+Lagrangian: lam_n hit the 2000 cap at 0.75M and stayed; load-factor mean excess fell
+from 0.25 to 0.005-0.03; a q-bar violation at 2.3M drove lam_qbar to ~890 and it decayed
+back over ~1.5M once satisfied; heat rate stayed within budget (lam ~190).
+Curriculum: level 1 (angles on) from 1.75M, never level 2 (needs |dpsi| <= 45 deg on
+half the cases; it reached 45-60 deg).
+
+| | nominal | realistic S3 median (IQM, 95 % CI) | <= 10 / 20 km | feasible & <= 10 km | peak ratio p95 | feasible | SCVX ic_tc / models | median dfpa / dpsi |
+|---|---|---|---|---|---|---|---|---|
+| v22 best | 21.4 | 24.0 (25.1, [23.9, 26.7]) | 0 % / 31 % | 0 % | 1.105 | 68 % | 155 / 534 | 14.0 / 67.7 |
+| **v23 best** | 9.2 | **9.4 (9.9, [9.5, 10.5])** | 57 % / 84 % | 50 % | **1.017** | **79 %** | 89 / 436 | 14.5 / 60.3 |
+| **v23 final** | **5.0** | **7.5 (7.8, [7.5, 8.1])** | **71 % / 89 %** | **57 %** | 1.066 | 75 % | **64** / 291 | 17.0 / 57.0 |
+| SCvx G&C | 0.016 | — | — | — | — | — | 0.21 / 0.33 | 0.30 / 0.62 |
+
+B + C together: realistic-test IQM 25 -> 8-10 km (2.5-3x) while the constraint tail
+tightened (p95 peak ratio 1.105 -> 1.017 for the best model; load-factor violations 19 % ->
+8 %). The ~14 km floor of v22 is gone (7 % of realistic cases within 5 km for the final
+model), so it was not a hard limit of bank-only flight. Heading improved 68 -> 57-60 deg;
+FPA did not (14 -> 15-17 deg; the final model dives more steeply). AoA still at 40 deg.

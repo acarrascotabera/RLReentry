@@ -1,0 +1,108 @@
+{
+ "run": "stage2_v23",
+ "timesteps_config": 10000000,
+ "steps_evaluated": 10000000,
+ "n_validations": 40,
+ "best_by_score": {
+  "step": 8750000,
+  "d_km": 9.247,
+  "dfpa_deg": -12.855,
+  "dpsi_deg": -59.696,
+  "peak_ratio": 1.0185,
+  "alpha_std_deg": 0.013,
+  "score": 54.003
+ },
+ "last": {
+  "step": 10000000,
+  "d_km": 5.024,
+  "dfpa_deg": -18.729,
+  "dpsi_deg": -48.539,
+  "peak_ratio": 1.1176,
+  "alpha_std_deg": 0.01,
+  "score": 128.08
+ },
+ "best_feasible_d": null,
+ "milestones_feasible_first_step": {
+  "d<100km": null,
+  "d<50km": null,
+  "d<20km": null,
+  "d<10km": null,
+  "d<5km": null,
+  "d<1km": null
+ },
+ "regimes": {
+  "modulated_feasible": {
+   "fraction": 0.0,
+   "median_d_km": null,
+   "min_d_km": null,
+   "median_peak_ratio": null
+  },
+  "modulated_over_limit": {
+   "fraction": 0.0,
+   "median_d_km": null,
+   "min_d_km": null,
+   "median_peak_ratio": null
+  },
+  "locked_feasible": {
+   "fraction": 0.0,
+   "median_d_km": null,
+   "min_d_km": null,
+   "median_peak_ratio": null
+  },
+  "locked_over_limit": {
+   "fraction": 1.0,
+   "median_d_km": 11.7,
+   "min_d_km": 5.0,
+   "median_peak_ratio": 1.105
+  }
+ },
+ "regime_switches": 0,
+ "spearman": {
+  "d_vs_peak_ratio": 0.417,
+  "d_vs_alpha_std": -0.697
+ },
+ "trend_last_window": {
+  "window_steps": 2000000,
+  "log10_d_slope_per_M": -0.0445,
+  "steps_since_best": 1250000,
+  "return_slope_per_M": 72.31
+ },
+ "return": {
+  "first": 511.0,
+  "max": 994.0,
+  "last_window_median": 821.0
+ },
+ "ppo_health": {
+  "approx_kl": {
+   "median": 0.004586471,
+   "p95": 0.021899136499999992,
+   "max": 0.08451736,
+   "min": 0.000537646
+  },
+  "explained_variance": {
+   "median": 0.999,
+   "p95": 1.0,
+   "max": 1.0,
+   "min": 0.97
+  },
+  "value_loss": {
+   "median": 47.9,
+   "p95": 595.5499999999911,
+   "max": 6560.0,
+   "min": 13.5
+  },
+  "clip_fraction": {
+   "median": 0.0838,
+   "p95": 0.12854999999999991,
+   "max": 0.179,
+   "min": 0.00177
+  },
+  "updates_kl_over_1p5_target": 1
+ },
+ "curriculum": {
+  "final_level": 1,
+  "advances": [
+   1750000
+  ]
+ }
+}
