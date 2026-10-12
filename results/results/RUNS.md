@@ -863,3 +863,23 @@ lam_Qdot 191, lam_qbar 190), dispersion training and selection (best-so-far scor
 from 8.75M carried over). Before resuming, an anti-windup clamp was added to the PID
 integral (I_k <= (lam_max - lam0)/Ki = 1.8; the load-factor integral had wound up to 9.0).
 Log: train_log_resume1.txt; segment: resume_log.json. ~500 steps/s.
+
+**v23 resumed outcome — done (20M, 2026-10-12 20:12).** Best by score at 16.5M (all cases
+within 1.9 %); final 3.26 km nominal. Return median over the last 2M ~1320 (max 1490), still
+rising; approx_kl median 0.0044; explained variance >= 0.97. Validation median 3.7-4.6 km
+over the last 1M. Load factor still the binding constraint: mean training excess 3.5 %
+(0-10M), 1.2 % (10-15M), 2.0 % (15-20M) vs the 0.5 % budget, lam_n mostly at the 2000 cap.
+The extra precision comes with a steeper terminal dive (final model gamma_f ~ -31 deg vs
+-10 deg target), which is also what drives the load-factor peaks. Curriculum stayed at
+level 1 (heading 52-61 deg off, needs 45).
+
+| v23 model | nominal | realistic S3 median (IQM, 95 % CI) | <= 5 / 10 km | feasible & <= 5 km | peak p95 | feasible | SCVX ic_tc median (<= 10 km) | SCVX models |
+|---|---|---|---|---|---|---|---|---|
+| 8.75M best | 9.25 | 9.4 (9.9, [9.5, 10.5]) | 0 % / 57 % | 0 % | 1.017 | 79 % | 89 (—) | 436 |
+| 10M final | 5.01 | 7.5 (7.8, [7.5, 8.1]) | 7 % / 71 % | 6 % | 1.066 | 75 % | 64 (7 %) | 291 |
+| 16.5M best | 4.82 | 6.3 (7.6, [6.9, 8.5]) | 29 % / 66 % | 27 % | 1.071 | 79 % | 101 (12 %) | 372 |
+| **20M final** | **3.26** | **4.2 (4.2, [4.0, 4.3])** | **71 % / 89 %** | **57 %** | 1.162 | 75 % | **39 (18 %)** | **231** |
+
+The second warm-restart segment halved the realistic-test error again (IQM 7.8 -> 4.2 km)
+and the SCvx-scenario median (64 -> 39 km); no case within 1 km yet, and the constraint
+tail of the final model widened (p95 1.07 -> 1.16).

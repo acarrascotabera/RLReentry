@@ -22,13 +22,14 @@ import matplotlib.pyplot as plt
 
 ROOT = Path(__file__).resolve().parents[2]
 RES = ROOT / "results"
-C = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]
+C = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]
 INK, INK2, GRID, SURFACE = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
 
 POLICIES = [("v21 best (nominal training, 29.2M)", RES / "stage2_v21/eval_mc_best_29p2M"),
             ("v22 best (dispersion training)", RES / "stage2_v22/eval_mc_best"),
-            ("v23 best (+ Lagrangian, early angles)", RES / "stage2_v23/eval_mc_best"),
-            ("v23 final", RES / "stage2_v23/eval_mc_final")]
+            ("v23 10M best (+ Lagrangian, early angles)", RES / "stage2_v23/eval_mc_best_8p75M"),
+            ("v23 20M best (16.5M)", RES / "stage2_v23/eval_mc_best_16p5M"),
+            ("v23 20M final", RES / "stage2_v23/eval_mc_final_20M")]
 
 
 def _cdf(ax, d, color, label, ls="-"):
