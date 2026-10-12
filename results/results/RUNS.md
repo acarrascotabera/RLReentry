@@ -854,3 +854,12 @@ tightened (p95 peak ratio 1.105 -> 1.017 for the best model; load-factor violati
 8 %). The ~14 km floor of v22 is gone (7 % of realistic cases within 5 km for the final
 model), so it was not a hard limit of bank-only flight. Heading improved 68 -> 57-60 deg;
 FPA did not (14 -> 15-17 deg; the final model dives more steeply). AoA still at 40 deg.
+
+### v23 resumed — running (2026-10-12 12:23): +10M steps (to 20M), warm restart
+
+`--resume results/stage2_v23 --timesteps 10000000 --lr-decay --lr-restart` with the same
+curriculum (v23, continues at level 1), PID-Lagrangian (multipliers restored: lam_n 2000,
+lam_Qdot 191, lam_qbar 190), dispersion training and selection (best-so-far score 54.0
+from 8.75M carried over). Before resuming, an anti-windup clamp was added to the PID
+integral (I_k <= (lam_max - lam0)/Ki = 1.8; the load-factor integral had wound up to 9.0).
+Log: train_log_resume1.txt; segment: resume_log.json. ~500 steps/s.

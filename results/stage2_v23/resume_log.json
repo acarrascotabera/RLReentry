@@ -1,0 +1,10 @@
+[
+ {
+  "resumed_from": "ppo_10000000_steps.zip",
+  "at_steps": 10000000,
+  "extra_steps": 10000000,
+  "lr_restart": true,
+  "lr_at_resume": 0.0001,
+  "started": "2026-10-12T12:23:47"
+ }
+]
