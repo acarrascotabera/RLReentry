@@ -14,7 +14,10 @@ training episodes that ended in that rollout:
     lam_k  = clip(lam0 + Kp e_k + Ki I_k + Kd max(0, e_k - e_k_prev), 0, lam_max)
 
 The integral term is plain dual ascent; the proportional and derivative terms
-damp the oscillation of pure Lagrangian PPO. lam_max bounds the return scale
+damp the oscillation of pure Lagrangian PPO. Anti-windup: I_k is clamped to
+(lam_max - lam0) / Ki, the most the cap can use (in v23 the load-factor integral
+had wound up to 9.0 against 1.8 needed for the cap, which would have kept lam_n
+pinned for ~1,800 rollouts after the constraint was met). lam_max bounds the return scale
 (v20d: a 1000-weight peak charge on 12x violations broke the critic). New
 multipliers are pushed with env_method("set_reward_params") and take effect at
 each env's next reset. History: <run>/eval/lagrange.csv; state for --resume:
@@ -49,6 +52,9 @@ class PIDLagrangianCallback(BaseCallback):
         self.history_path = self.outdir / "eval" / "lagrange.csv"
         self.state_path = self.outdir / "lagrange_state.json"
 
+    def _i_max(self):
+        return (self.lam_max - self.lam0) / self.ki if self.ki > 0 else float("inf")
+
     # -- state -----------------------------------------------------------------
     def params(self):
         return {f"lam_{k}": float(v) for k, v in self.lam.items()}
@@ -63,6 +69,7 @@ class PIDLagrangianCallback(BaseCallback):
         if self.state_path.exists():
             st = json.loads(self.state_path.read_text())
             self.lam, self.I, self.e_prev = st["lam"], st["I"], st["e_prev"]
+            self.I = {k: min(v, self._i_max()) for k, v in self.I.items()}   # anti-windup
         return self.lam
 
     def apply_to(self, weights):
@@ -87,7 +94,7 @@ class PIDLagrangianCallback(BaseCallback):
             x = np.asarray(self._excess[k])
             J = float(x.mean())
             e = J - self.budget
-            self.I[k] = max(0.0, self.I[k] + e)
+            self.I[k] = min(max(0.0, self.I[k] + e), self._i_max())
             d = max(0.0, e - self.e_prev[k])
             self.lam[k] = float(np.clip(self.lam0 + self.kp * e + self.ki * self.I[k] + self.kd * d,
                                         0.0, self.lam_max))
