@@ -59,7 +59,11 @@ _DEG = np.pi / 180.0
 #         grid coordinate, log), the range-to-go per unit energy-to-go (a required-
 #         L/D proxy), and the measured drag acceleration and L/D (accelerometer-
 #         observable; they expose the density and aero dispersions directly)
-OBS_VERSIONS = ("v13", "v15", "v20", "v24")
+#   v25 : + 3 running path-constraint peaks (episode max of Qdot, qbar, n over their
+#         limits so far): the per-constraint Lagrangian charge depends on the episode
+#         peak, so without them the return is not a function of the observed state
+OBS_VERSIONS = ("v13", "v15", "v20", "v24", "v25")
+PEAK_CHARGES = ("terminal", "incremental")
 ACTION_MODES = ("rate", "target")
 STEP_MODES = ("time", "energy")
 
@@ -96,7 +100,8 @@ class EntryEnvBase(gym.Env):
                  max_steps=2500, j_ref=None, seed=None, log_range_obs=True,
                  obs_version=None, exact_terminal=True, rate_saturation=True,
                  scenario_sampler=None, action_mode="rate", step_mode="time",
-                 energy_steps=800, dt_max=10.0, dt_late=1.0, track_gain=2.0):
+                 energy_steps=800, dt_max=10.0, dt_late=1.0, track_gain=2.0,
+                 peak_charge="terminal"):
         super().__init__()
         # private copy: DummyVecEnv hands every env the same weights object, and the
         # curriculum changes weights per env (set_reward_params)
@@ -125,6 +130,13 @@ class EntryEnvBase(gym.Env):
         self.dt_max = float(dt_max)
         self.dt_late = float(dt_late)
         self.track_gain = float(track_gain)
+        # peak_charge "incremental": the episode-peak charges (w_peak, lam_k) are paid at the
+        # step where the running peak excess grows, lam*(exc_t - exc_{t-1}). The sum
+        # telescopes to the terminal charge lam*max(0, peak-1) (identical undiscounted
+        # return), but the cost lands at the heat pulse instead of ~600 decisions later.
+        if peak_charge not in PEAK_CHARGES:
+            raise ValueError(f"peak_charge must be one of {PEAK_CHARGES}")
+        self.peak_charge = peak_charge
         self.scenario_sampler = scenario_sampler
         self.J_ref = float(j_ref) if j_ref is not None else C.J_REF_BANK_ONLY
 
@@ -150,10 +162,12 @@ class EntryEnvBase(gym.Env):
         n = 12 + (1 if self.optimize_aoa else 0)
         if self.obs_version != "v13":
             n += 1
-        if self.obs_version in ("v20", "v24"):
+        if self.obs_version in ("v20", "v24", "v25"):
             n += 8
-        if self.obs_version == "v24":
+        if self.obs_version in ("v24", "v25"):
             n += 6
+        if self.obs_version == "v25":
+            n += 3
         return n
 
     # -- curriculum hook ------------------------------------------------------
@@ -426,6 +440,7 @@ class EntryEnvBase(gym.Env):
         self._prev_G = self._angle_potential()
         self._peak_ratio = 0.0
         self._peaks = {"Qdot": 0.0, "qbar": 0.0, "n": 0.0}
+        self._exc_prev = {"Qdot": 0.0, "qbar": 0.0, "n": 0.0}
         self._step_barrier = 0.0
         self._sig_t = z[6]                            # targets start at the current attitude
         self._alp_t = z[7] if self.optimize_aoa else 0.0
@@ -514,6 +529,12 @@ class EntryEnvBase(gym.Env):
             pk["qbar"] = max(pk["qbar"], c["qbar"] / C.QBAR_MAX)
             pk["n"] = max(pk["n"], c["n"] / C.N_MAX)
         self._peak_ratio = max(pk.values())
+        if self.peak_charge == "incremental":
+            exc = {k: max(0.0, v - 1.0) for k, v in pk.items()}
+            ep = self._exc_prev
+            r -= (w.lam_Qdot * (exc["Qdot"] - ep["Qdot"]) + w.lam_qbar * (exc["qbar"] - ep["qbar"])
+                  + w.lam_n * (exc["n"] - ep["n"]) + w.w_peak * (max(exc.values()) - max(ep.values())))
+            self._exc_prev = exc
 
         terminated = truncated = False
         tinfo = {}
@@ -551,12 +572,13 @@ class EntryEnvBase(gym.Env):
             chatter_mean = self._chatter / max(self.steps, 1)
             r -= w.w_smooth * chatter_mean
             tinfo["chatter_mean"] = chatter_mean
-            # worst path-constraint excess of the episode, charged once on every ending
-            r -= w.w_peak * max(0.0, self._peak_ratio - 1.0)
-            # per-constraint Lagrangian terms (multipliers adapted during training)
             pk = self._peaks
-            r -= (w.lam_Qdot * max(0.0, pk["Qdot"] - 1.0) + w.lam_qbar * max(0.0, pk["qbar"] - 1.0)
-                  + w.lam_n * max(0.0, pk["n"] - 1.0))
+            if self.peak_charge == "terminal":
+                # worst path-constraint excess of the episode, charged once on every ending
+                r -= w.w_peak * max(0.0, self._peak_ratio - 1.0)
+                # per-constraint Lagrangian terms (multipliers adapted during training)
+                r -= (w.lam_Qdot * max(0.0, pk["Qdot"] - 1.0) + w.lam_qbar * max(0.0, pk["qbar"] - 1.0)
+                      + w.lam_n * max(0.0, pk["n"] - 1.0))
             tinfo["peak_ratio"] = self._peak_ratio
             tinfo["peak_Qdot"], tinfo["peak_qbar"], tinfo["peak_n"] = pk["Qdot"], pk["qbar"], pk["n"]
             terr = self._terminal_errors()
@@ -626,7 +648,7 @@ class EntryEnvBase(gym.Env):
         # Kept LAST so older policies map onto a zero-padded input column.
         if self.obs_version != "v13":
             feats.append(np.log10(max(self._range_to_go() / 1000.0, 0.1)) / 4.0)
-        if self.obs_version in ("v20", "v24"):
+        if self.obs_version in ("v20", "v24", "v25"):
             dfpa = np.rad2deg(z[4] - self.tgt_fpa)
             dpsi_rad = _wrap_pi(z[5] - self.tgt_psi)
             dpsi = np.rad2deg(dpsi_rad)
@@ -639,7 +661,7 @@ class EntryEnvBase(gym.Env):
                 np.log10(max(c["alt"] - self.tgt_alt, 1.0)) / 5.0,   # altitude-to-go [m]
                 np.sin(brg), np.cos(brg),                     # target bearing vs final heading
             ]
-        if self.obs_version == "v24":
+        if self.obs_version in ("v24", "v25"):
             e = self.energy_togo(z)
             de_nd = max(_energy_nd(z) - _EF_NOM, 1e-6)
             feats += [
@@ -650,6 +672,9 @@ class EntryEnvBase(gym.Env):
                 min(c["D"], 5.0) / 2.5,                       # measured drag acceleration [g]
                 min(c["L"] / max(c["D"], 1e-9), 4.0) / 2.0,   # measured L/D
             ]
+        if self.obs_version == "v25":
+            pk = self._peaks
+            feats += [min(pk["Qdot"], 3.0), min(pk["qbar"], 3.0), min(pk["n"], 3.0)]
         return np.asarray(feats, dtype=np.float32)
 
     # -- info (cheap; full physical state for logging / CSV export) --------

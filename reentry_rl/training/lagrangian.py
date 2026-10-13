@@ -18,7 +18,11 @@ damp the oscillation of pure Lagrangian PPO. Anti-windup: I_k is clamped to
 (lam_max - lam0) / Ki, the most the cap can use (in v23 the load-factor integral
 had wound up to 9.0 against 1.8 needed for the cap, which would have kept lam_n
 pinned for ~1,800 rollouts after the constraint was met). lam_max bounds the return scale
-(v20d: a 1000-weight peak charge on 12x violations broke the critic). New
+(v20d: a 1000-weight peak charge on 12x violations broke the critic). rate_max bounds
+the INCREASE of each multiplier per rollout (v24: at the end of the warm-up the cold-start
+policy violated the heat rate by 73 %, Kp*e alone took lam_Qdot from 200 to ~1,700 in one
+rollout and to the 4,000 cap in three — a -2,900 step in the return), with conditional
+integration (I is frozen while the limiter is active, so the ramp does not wind up). New
 multipliers are pushed with env_method("set_reward_params") and take effect at
 each env's next reset. History: <run>/eval/lagrange.csv; state for --resume:
 <run>/lagrange_state.json.
@@ -36,7 +40,7 @@ CONSTRAINTS = ("Qdot", "qbar", "n")
 class PIDLagrangianCallback(BaseCallback):
     def __init__(self, outdir, budget=0.005, kp=2000.0, ki=1000.0, kd=0.0, lam_init=200.0,
                  lam_max=2000.0, min_episodes=4, weights=None, val_callback=None, start_step=0,
-                 verbose=1):
+                 rate_max=None, verbose=1):
         super().__init__(verbose)
         self.outdir = Path(outdir)
         self.budget = float(budget)
@@ -47,6 +51,7 @@ class PIDLagrangianCallback(BaseCallback):
         # warm-up: multipliers held at lam_init until this many steps (a cold-start policy
         # violates every constraint by ~2x; at the cap the penalties would swamp the return)
         self.start_step = int(start_step)
+        self.rate_max = None if rate_max is None else float(rate_max)
         self.weights = weights
         self.val_callback = val_callback
         self.lam = {k: self.lam0 for k in CONSTRAINTS}
@@ -67,7 +72,8 @@ class PIDLagrangianCallback(BaseCallback):
         self.state_path.write_text(json.dumps({"lam": self.lam, "I": self.I, "e_prev": self.e_prev,
                                                "budget": self.budget, "kp": self.kp, "ki": self.ki,
                                                "kd": self.kd, "lam_init": self.lam0,
-                                               "lam_max": self.lam_max}, indent=1))
+                                               "lam_max": self.lam_max, "rate_max": self.rate_max},
+                                              indent=1))
 
     def restore(self):
         if self.state_path.exists():
@@ -100,10 +106,14 @@ class PIDLagrangianCallback(BaseCallback):
             J = float(x.mean())
             e = J - self.budget
             if not warm:
-                self.I[k] = min(max(0.0, self.I[k] + e), self._i_max())
+                I_new = min(max(0.0, self.I[k] + e), self._i_max())
                 d = max(0.0, e - self.e_prev[k])
-                self.lam[k] = float(np.clip(self.lam0 + self.kp * e + self.ki * self.I[k] + self.kd * d,
-                                            0.0, self.lam_max))
+                lam = float(np.clip(self.lam0 + self.kp * e + self.ki * I_new + self.kd * d,
+                                    0.0, self.lam_max))
+                if self.rate_max is not None and lam > self.lam[k] + self.rate_max:
+                    lam = self.lam[k] + self.rate_max
+                    I_new = min(I_new, self.I[k])      # conditional integration (no ramp windup)
+                self.I[k], self.lam[k] = I_new, lam
                 self.e_prev[k] = e
             rec[f"J_{k}"] = J
             rec[f"viol_rate_{k}"] = float((x > 0.0).mean())

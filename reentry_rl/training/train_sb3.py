@@ -99,6 +99,14 @@ def parse_args():
     ap.add_argument("--lag-max", type=float, default=2000.0, help="multiplier cap (bounds the return scale)")
     ap.add_argument("--lag-start", type=int, default=0,
                     help="hold the multipliers at --lag-init until this many steps (cold-start warm-up)")
+    ap.add_argument("--lag-rate", type=float, default=None,
+                    help="max increase of each multiplier per rollout (ramp instead of a step)")
+    ap.add_argument("--peak-charge", default=None, choices=["terminal", "incremental"],
+                    help="episode-peak charges paid at the end (legacy) or as the running peak grows")
+    ap.add_argument("--init-action-mean", default=None,
+                    help="initial Gaussian mean of a fresh policy, comma-separated per action "
+                         "(target mode: pre-tanh; e.g. 0,2 = bank 0, AoA ~39.4 deg: the lift-up "
+                         "attitude-hold start of rate mode)")
     ap.add_argument("--curriculum-pass-frac", type=float, default=0.75)
     ap.add_argument("--legacy-terminal", action="store_true",
                     help="terminal state at the first step below 25 km instead of the exact crossing")
@@ -164,6 +172,8 @@ def main():
         env_kwargs["action_mode"] = args.action_mode
     if args.step_mode:
         env_kwargs["step_mode"] = args.step_mode
+    if args.peak_charge:
+        env_kwargs["peak_charge"] = args.peak_charge
     if args.energy_steps:
         env_kwargs["energy_steps"] = args.energy_steps
 
@@ -248,7 +258,7 @@ def main():
     if args.lagrangian:
         lagrange = PIDLagrangianCallback(outdir, budget=args.lag_budget, kp=args.lag_kp, ki=args.lag_ki,
                                          kd=args.lag_kd, lam_init=args.lag_init, lam_max=args.lag_max,
-                                         start_step=args.lag_start)
+                                         start_step=args.lag_start, rate_max=args.lag_rate)
         if args.resume:
             lagrange.restore()
         weights.w_peak = 0.0                  # the multipliers replace the fixed peak charge
@@ -334,6 +344,14 @@ def main():
     else:
         model = PPO("MlpPolicy", venv, seed=args.seed, verbose=1,
                     tensorboard_log=tb_log, **ppo_kwargs)
+        if args.init_action_mean:
+            # the action head is orthogonally initialized with gain 0.01, so its bias sets
+            # the initial mean for every state
+            import torch
+            mu0 = [float(v) for v in args.init_action_mean.split(",")]
+            with torch.no_grad():
+                model.policy.action_net.bias.copy_(torch.tensor(mu0, dtype=torch.float32))
+            print(f"[init] initial action mean {mu0}")
 
     if args.action_std is not None:
         stds = set_action_std(model, [float(v) for v in str(args.action_std).split(",")])
@@ -358,7 +376,8 @@ def main():
             "lagrangian": (None if lagrange is None else
                            {"budget": args.lag_budget, "kp": args.lag_kp, "ki": args.lag_ki,
                             "kd": args.lag_kd, "lam_init": args.lag_init, "lam_max": args.lag_max,
-                            "start_step": args.lag_start}),
+                            "start_step": args.lag_start, "rate_max": args.lag_rate}),
+            "init_action_mean": args.init_action_mean,
             "curriculum": (None if curriculum is None else
                            {"preset": args.curriculum, "min_steps": args.curriculum_min_steps,
                             "pass_frac": args.curriculum_pass_frac, "levels": curriculum.levels,

@@ -886,7 +886,7 @@ tail of the final model widened (p95 1.07 -> 1.16).
 
 ## Reformulation era (2026-10-13): energy decisions, absolute attitude targets, from scratch
 
-### v24 — running (launched 2026-10-13 12:22): cold start, 20M decisions
+### v24 — stopped at 3.69M (2026-10-13 12:22 - 16:50): cold start, 20M decisions planned
 
 No warm start. New formulation (commits 32e542e, 4ee0da6):
 - **Energy as the independent variable** (`--step-mode energy --energy-steps 800`): one
@@ -910,3 +910,54 @@ No warm start. New formulation (commits 32e542e, 4ee0da6):
 - PPO: 512x512, lr 3e-4 decayed, n_steps 2048 x 8, batch 512, 5 epochs, gamma 0.9995,
   lambda 0.95, clip 0.2, ent 0.005, target_kl 0.05, action std 0.5.
 Throughput ~150-160 decisions/s at start (random policies loft: long, slow, capped steps).
+
+**v24 outcome — stopped at 3.69M (local optimum, no escape).** Validation median 2,153 ->
+1,360 km (0.75-1M), then 3,133 km (1.25M) and 4,200-4,400 km from 2M on; feasible 0 %.
+The return plateaued at -2,410 from 1.0M to 2.0M with explained variance -> 0.999 (a
+converged, deterministic mode), then stepped to -5,300 when the Lagrange warm-up ended and
+stayed there (approx_kl 0.001-0.004; action std drifted 0.50 -> 0.89 under ent 0.005).
+Heat-rate excess 0.71-0.77 on 100 % of the episodes with lam_Qdot pinned at the 4,000 cap
+from ~2.05M (Kp*e alone moved it 200 -> ~1,700 in one rollout).
+
+Diagnosis (3M checkpoint, nominal; open-loop constant targets):
+- The policy holds AoA at 39-40 deg (pre-tanh 2.2-2.7) but banks ~80 deg right from entry
+  (pre-tanh ~2.5), meets the heat pulse at 64 km instead of ~75 km (peak Qdot 1.82x) and
+  reaches 25 km at t = 1,015 s, ~4,200 km short. The geometry needs a right turn (entry at
+  0/0 heading north, target 70N/12E heading east), so the sign is right, the magnitude not.
+- Heat rate is nearly binding at the best attitude: constant (alpha, bank) = (40, 0) gives
+  peak Qdot 0.984x (overshoots ~430 km), (35, 0) 1.106x, (30, 0) 1.263x, (22.5, 0) 1.597x,
+  (40, 60) 1.373x. Only lift-up at 40 deg through the pulse (t ~ 225 s, h ~ 75 km) is feasible.
+- The reward is not the problem: with the 1M-2M weights (lam = 200) and the policy's own
+  exploration noise, a noisy (40, 0) flight scores -1,980 (958 km) against -2,401 (3,998 km)
+  for the 2M policy; with the current multipliers -2,426 vs -5,411. It is a local optimum
+  in a flat far field: the position anchor is 1,760 at 500 km and 1,853 at 4,300 km (the
+  linear w_far term stops at d_far = 500 km), so nothing pulls a policy that lands
+  thousands of km off back.
+- Why the cold start went there: in rate mode the zero action HOLDS the initial attitude
+  (bank 0, alpha 40 = the near-feasible lift-up flight, ~430 km off), so every earlier
+  policy started in the near-field basin — and v21 was not a true cold start either (it
+  was initialized from stage2_v21_init, an expanded earlier model). In target mode the zero
+  action is (bank 0, alpha 22.5 deg): a massive overshoot at 1.6x heat rate; correcting it
+  drove the bank to the right saturation and past the target onto the flat short side.
+- Credit assignment: the per-constraint Lagrangian charge was paid at the episode end on the
+  episode PEAK, which is not in the observation (non-Markov return; ~600 decisions between
+  the heat pulse and the charge).
+
+### v24b — running (launched 2026-10-13): cold start with the v24 fixes, 20M decisions
+
+Same formulation as v24 (energy decisions, absolute attitude targets, v24 curriculum,
+dispersion training, selection) plus:
+- **Initial action mean** (`--init-action-mean 0,2.5`): the action head's bias puts a fresh
+  policy at bank 0, AoA 39.8 deg — the attitude-hold start of rate mode (lift-up, peak Qdot
+  ~1.0x, ~430 km off). The policy remains free over the full [5, 40] deg / +-85 deg range.
+- **Incremental peak charge** (`--peak-charge incremental`): w_peak and lam_k are paid at the
+  decision where the running peak excess grows; it telescopes to the terminal charge
+  (verified: identical return, difference 0.0) but lands at the heat pulse.
+- **obs v25** (31): v24 + running peaks of Qdot, qbar, n over their limits (the charge is now
+  a function of the observed state).
+- **Lagrange ramp** (`--lag-rate 50`): multipliers rise at most 50 per rollout (cap 4000 in
+  ~1.2M decisions) with conditional integration (no windup during the ramp); warm-up 1M.
+- **ent_coef 0** (as v21-v23; the v24 std growth 0.50 -> 0.89 was entropy-driven).
+- **Far field**: linear w_far = 2/km extended to d_far = 1,500 km (covers the noisy lift-up
+  start at ~1,000 km).
+Legacy paths unchanged (HPO-best regression return -660.1399573458849 identical to HEAD).
