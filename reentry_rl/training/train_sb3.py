@@ -70,6 +70,13 @@ def parse_args():
     ap.add_argument("--save-below", type=float, default=None,
                     help="also snapshot every model whose validation score is below this")
     ap.add_argument("--obs-version", default=None, help="observation layout (default: env default)")
+    ap.add_argument("--action-mode", default=None, choices=["rate", "target"],
+                    help="rate: attitude-rate commands (legacy); target: absolute bank/AoA targets "
+                         "tracked by the env at the actuator rate limits")
+    ap.add_argument("--step-mode", default=None, choices=["time", "energy"],
+                    help="time: 1 s decisions (legacy); energy: decisions on a sqrt(energy-to-go) grid")
+    ap.add_argument("--energy-steps", type=int, default=None, help="levels of the energy grid (default 800)")
+    ap.add_argument("--net-arch", default=None, help="hidden layers of a fresh policy, e.g. 512,512")
     ap.add_argument("--train-dispersion", default=None,
                     help="domain randomization during training: comma-separated scenario groups "
                          "(ic, tc, models), a new draw at every episode reset")
@@ -90,6 +97,8 @@ def parse_args():
     ap.add_argument("--lag-kd", type=float, default=0.0)
     ap.add_argument("--lag-init", type=float, default=200.0, help="initial multiplier (= previous fixed w_peak)")
     ap.add_argument("--lag-max", type=float, default=2000.0, help="multiplier cap (bounds the return scale)")
+    ap.add_argument("--lag-start", type=int, default=0,
+                    help="hold the multipliers at --lag-init until this many steps (cold-start warm-up)")
     ap.add_argument("--curriculum-pass-frac", type=float, default=0.75)
     ap.add_argument("--legacy-terminal", action="store_true",
                     help="terminal state at the first step below 25 km instead of the exact crossing")
@@ -151,6 +160,12 @@ def main():
                   "rate_saturation": not args.legacy_integrator}
     if args.obs_version:
         env_kwargs["obs_version"] = args.obs_version
+    if args.action_mode:
+        env_kwargs["action_mode"] = args.action_mode
+    if args.step_mode:
+        env_kwargs["step_mode"] = args.step_mode
+    if args.energy_steps:
+        env_kwargs["energy_steps"] = args.energy_steps
 
     weights = RewardWeights()
     ppo_kwargs = dict(DEFAULT_PPO)
@@ -209,6 +224,9 @@ def main():
             ppo_kwargs["n_epochs"] = args.n_epochs
         if args.target_kl is not None:
             ppo_kwargs["target_kl"] = args.target_kl
+        if args.net_arch:
+            width = [int(v) for v in args.net_arch.split(",")]
+            ppo_kwargs["policy_kwargs"] = dict(net_arch=width)
         lr_base = ppo_kwargs["learning_rate"] if isinstance(ppo_kwargs["learning_rate"], (int, float)) else DEFAULT_PPO["learning_rate"]
         if args.lr_decay:
             ppo_kwargs["learning_rate"] = linear_schedule(lr_base)
@@ -229,7 +247,8 @@ def main():
     lagrange = None
     if args.lagrangian:
         lagrange = PIDLagrangianCallback(outdir, budget=args.lag_budget, kp=args.lag_kp, ki=args.lag_ki,
-                                         kd=args.lag_kd, lam_init=args.lag_init, lam_max=args.lag_max)
+                                         kd=args.lag_kd, lam_init=args.lag_init, lam_max=args.lag_max,
+                                         start_step=args.lag_start)
         if args.resume:
             lagrange.restore()
         weights.w_peak = 0.0                  # the multipliers replace the fixed peak charge
@@ -338,7 +357,8 @@ def main():
             "train_dispersion": (None if sampler is None else sampler.describe()),
             "lagrangian": (None if lagrange is None else
                            {"budget": args.lag_budget, "kp": args.lag_kp, "ki": args.lag_ki,
-                            "kd": args.lag_kd, "lam_init": args.lag_init, "lam_max": args.lag_max}),
+                            "kd": args.lag_kd, "lam_init": args.lag_init, "lam_max": args.lag_max,
+                            "start_step": args.lag_start}),
             "curriculum": (None if curriculum is None else
                            {"preset": args.curriculum, "min_steps": args.curriculum_min_steps,
                             "pass_frac": args.curriculum_pass_frac, "levels": curriculum.levels,

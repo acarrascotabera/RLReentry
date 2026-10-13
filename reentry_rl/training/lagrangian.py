@@ -35,7 +35,8 @@ CONSTRAINTS = ("Qdot", "qbar", "n")
 
 class PIDLagrangianCallback(BaseCallback):
     def __init__(self, outdir, budget=0.005, kp=2000.0, ki=1000.0, kd=0.0, lam_init=200.0,
-                 lam_max=2000.0, min_episodes=4, weights=None, val_callback=None, verbose=1):
+                 lam_max=2000.0, min_episodes=4, weights=None, val_callback=None, start_step=0,
+                 verbose=1):
         super().__init__(verbose)
         self.outdir = Path(outdir)
         self.budget = float(budget)
@@ -43,6 +44,9 @@ class PIDLagrangianCallback(BaseCallback):
         self.lam0 = float(lam_init)
         self.lam_max = float(lam_max)
         self.min_episodes = int(min_episodes)
+        # warm-up: multipliers held at lam_init until this many steps (a cold-start policy
+        # violates every constraint by ~2x; at the cap the penalties would swamp the return)
+        self.start_step = int(start_step)
         self.weights = weights
         self.val_callback = val_callback
         self.lam = {k: self.lam0 for k in CONSTRAINTS}
@@ -90,15 +94,17 @@ class PIDLagrangianCallback(BaseCallback):
         if n_ep < self.min_episodes:
             return
         rec = {"step": int(self.num_timesteps), "episodes": n_ep}
+        warm = self.num_timesteps < self.start_step
         for k in CONSTRAINTS:
             x = np.asarray(self._excess[k])
             J = float(x.mean())
             e = J - self.budget
-            self.I[k] = min(max(0.0, self.I[k] + e), self._i_max())
-            d = max(0.0, e - self.e_prev[k])
-            self.lam[k] = float(np.clip(self.lam0 + self.kp * e + self.ki * self.I[k] + self.kd * d,
-                                        0.0, self.lam_max))
-            self.e_prev[k] = e
+            if not warm:
+                self.I[k] = min(max(0.0, self.I[k] + e), self._i_max())
+                d = max(0.0, e - self.e_prev[k])
+                self.lam[k] = float(np.clip(self.lam0 + self.kp * e + self.ki * self.I[k] + self.kd * d,
+                                            0.0, self.lam_max))
+                self.e_prev[k] = e
             rec[f"J_{k}"] = J
             rec[f"viol_rate_{k}"] = float((x > 0.0).mean())
             rec[f"lam_{k}"] = self.lam[k]

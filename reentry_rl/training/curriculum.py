@@ -28,6 +28,11 @@ curriculum can tighten the angles while the landing error is still tens of km
 (the v20 levels required d <= 2 km at every level). Built for a dispersed
 validation set (S2_val_x0.1), hence the 50 % pass fraction (key "_pass_frac").
 
+Preset "v24" loosens the angle pass criteria (v23 sat on its first angle level for
+18M steps at heading 52-61 deg / FPA 15-21 deg against 45 / 10 deg): each level
+carries explicit pass thresholds ("_fpa_pass_deg", "_psi_pass_deg") instead of
+half the bonus ramp, starting at 20 deg / 65 deg and tightening level by level.
+
 Weights are pushed to every training env with env_method("set_reward_params")
 and take effect at each env's next reset. The level history is written to
 <run>/eval/curriculum.csv and the current level to <run>/curriculum_state.json
@@ -59,6 +64,17 @@ PRESETS["v23"] = dict(
              "_d_pass_km": 30.0, "_check_angles": False, "_pass_frac": 0.5}]
            + [{"w_ang_mult": c, "fpa_ramp_deg": f, "psi_ramp_deg": q, "w_succ_fpa": 250.0,
                "w_succ_psi": 250.0, "_d_pass_km": d, "_pass_frac": 0.5} for c, f, q, d in _V23])
+_V24 = [  # (w_ang_mult, fpa_ramp, psi_ramp, d_pass_km, fpa_pass_deg, psi_pass_deg)
+    (0.25, 20.0, 90.0, 30.0, 20.0, 65.0), (0.50, 10.0, 45.0, 25.0, 12.0, 45.0),
+    (1.00, 5.0, 20.0, 20.0, 6.0, 25.0), (1.00, 2.0, 8.0, 10.0, 3.0, 10.0),
+    (1.00, 0.5, 2.0, 5.0, 1.0, 3.0), (1.00, 0.1, 0.5, 2.0, 0.25, 1.0)]
+PRESETS["v24"] = dict(
+    base=dict(PRESETS["v20"]["base"]),
+    levels=[{"w_ang_mult": 0.0, "w_succ_fpa": 0.0, "w_succ_psi": 0.0,
+             "_d_pass_km": 30.0, "_check_angles": False, "_pass_frac": 0.5}]
+           + [{"w_ang_mult": c, "fpa_ramp_deg": f, "psi_ramp_deg": q, "w_succ_fpa": 250.0,
+               "w_succ_psi": 250.0, "_d_pass_km": d, "_fpa_pass_deg": fp, "_psi_pass_deg": qp,
+               "_pass_frac": 0.5} for c, f, q, d, fp, qp in _V24])
 PRESETS["v20r"] = dict(
     base=dict(PRESETS["v20"]["base"]),
     levels=[{"w_ang_mult": 0.0, "w_succ_fpa": 0.0, "w_succ_psi": 0.0,
@@ -117,8 +133,8 @@ class TerminalCurriculum:
         ok = ((df["outcome"] == "reached") & (df["max_ratio"] <= 1.02)
               & (df["d_km"] <= lv.get("_d_pass_km", self.d_pass_km)))
         if lv.get("_check_angles", True):
-            ok &= ((df["dfpa_deg"].abs() <= p["fpa_ramp_deg"] / 2.0)
-                   & (df["dpsi_deg"].abs() <= p["psi_ramp_deg"] / 2.0))
+            ok &= ((df["dfpa_deg"].abs() <= lv.get("_fpa_pass_deg", p["fpa_ramp_deg"] / 2.0))
+                   & (df["dpsi_deg"].abs() <= lv.get("_psi_pass_deg", p["psi_ramp_deg"] / 2.0)))
         return float(ok.mean())
 
     def on_validation(self, callback, df, rec):

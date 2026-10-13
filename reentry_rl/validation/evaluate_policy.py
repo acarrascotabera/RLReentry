@@ -51,10 +51,22 @@ def _env_classes():
 def obs_version_for(stage, obs_dim):
     """Infer the observation layout a model was trained with from its input width."""
     env_cls = _env_classes()[stage]
-    for ver in ("v13", "v15", "v20"):
+    for ver in ("v13", "v15", "v20", "v24"):
         if env_cls(obs_version=ver).observation_space.shape[0] == obs_dim:
             return ver
     raise ValueError(f"no {stage} observation layout has {obs_dim} features")
+
+
+def env_kwargs_for(model_path):
+    """Env options a model was trained with, from the run's config.json (next to the
+    model, one or two directories up). Empty for pre-2026-10 runs (legacy defaults)."""
+    p = Path(model_path).resolve()
+    for d in (p.parent, p.parent.parent, p.parent.parent.parent):
+        f = d / "config.json"
+        if f.exists():
+            kw = json.loads(f.read_text()).get("env_kwargs") or {}
+            return {k: v for k, v in kw.items() if k != "scenario_sampler"}
+    return {}
 
 
 def load_policy(model_path, vn_path):
@@ -89,7 +101,8 @@ class PolicyRunner:
         self.mean = np.asarray(obs_rms.mean, dtype=np.float64)
         self.std = np.sqrt(np.asarray(obs_rms.var, dtype=np.float64) + VECNORM_EPS)
         kw = dict(env_kwargs or {})
-        kw.setdefault("obs_version", obs_version_for(stage, model.observation_space.shape[0]))
+        if "obs_version" not in kw:               # infer only when not given explicitly
+            kw["obs_version"] = obs_version_for(stage, model.observation_space.shape[0])
         self.env = _env_classes()[stage](weights=weights or RewardWeights(), **kw)
         self.j_ref = self.env.J_ref
 
@@ -98,14 +111,15 @@ class PolicyRunner:
         with self._th.no_grad():
             a = self.model.policy._predict(
                 self._th.as_tensor(on[None], dtype=self._th.float32), deterministic=True)
-        return np.clip(a.numpy()[0], -1.0, 1.0)
+        sp = self.env.action_space                  # [-1, 1] (rate) or [-3, 3] (target mode)
+        return np.clip(a.numpy()[0], sp.low, sp.high)
 
     def run(self, scenario: Scenario, record=False):
         env = self.env
         obs, info = env.reset(options={"scenario": scenario})
         ret, traj = 0.0, []
         mQ = mq = mn = 0.0
-        sig, alp, sdot = [], [], []
+        sig, alp, tt = [], [], []
         while True:
             a = self.act(obs)
             obs, r, term, trunc, info = env.step(a)
@@ -115,13 +129,18 @@ class PolicyRunner:
             mn = max(mn, info["n_g"] / C.N_MAX)
             sig.append(info["sigma_deg"])
             alp.append(info["alpha_deg"])
-            sdot.append(float(a[0]) * np.rad2deg(C.SIGMA_DOT_MAX))
+            tt.append(info["t_s"])
             if record:
                 traj.append({k: info[k] for k in TRAJ_FIELDS})
             if term or trunc:
                 break
-        sig, alp = np.asarray(sig), np.asarray(alp)
+        sig, alp, tt = np.asarray(sig), np.asarray(alp), np.asarray(tt)
+        # realized bank rate from the attitude history (valid for rate and target modes)
+        sdot = np.diff(sig) / np.maximum(np.diff(tt), 1e-6) if sig.size > 1 else np.zeros(1)
         max_ratio = max(mQ, mq, mn)
+        if "peak_ratio" in info:                      # substep-resolution peaks (energy mode)
+            mQ, mq, mn = info["peak_Qdot"], info["peak_qbar"], info["peak_n"]
+            max_ratio = info["peak_ratio"]
         m = {"outcome": info["outcome"], "steps": env.steps, "tf_s": info["t_s"],
              "episode_return": ret,
              "d_km": info["d_km"], "dh_m": info["dh_m"], "dlat_deg": info["dlat_deg"],
@@ -307,8 +326,10 @@ def main():
 
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    env_kwargs = {"exact_terminal": not args.legacy_terminal,
+    env_kwargs = {**env_kwargs_for(args.model),
+                  "exact_terminal": not args.legacy_terminal,
                   "rate_saturation": not args.legacy_integrator}
+    print(f"[eval] env options: {env_kwargs}")
     for set_ref in args.sets:
         path = resolve_set(set_ref)
         name, scen, labels = load_set(path)

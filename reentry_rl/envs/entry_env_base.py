@@ -55,7 +55,26 @@ _DEG = np.pi / 180.0
 #         target (linear and signed-log, resolution down to the 0.1 % tolerance),
 #         log altitude-to-go (the episode ends on altitude), and the bearing to
 #         the target relative to the required final heading (approach geometry)
-OBS_VERSIONS = ("v13", "v15", "v20")
+#   v24 : + 6 energy features: normalized energy-to-go e (linear, sqrt = the decision
+#         grid coordinate, log), the range-to-go per unit energy-to-go (a required-
+#         L/D proxy), and the measured drag acceleration and L/D (accelerometer-
+#         observable; they expose the density and aero dispersions directly)
+OBS_VERSIONS = ("v13", "v15", "v20", "v24")
+ACTION_MODES = ("rate", "target")
+STEP_MODES = ("time", "energy")
+
+# Specific mechanical energy, non-dimensional (units of g0*R0): E = V_nd^2/2 - mu_bar/r_nd
+_MUBAR = C.MU / (C.G0 * C.R0 ** 2)
+
+
+def _energy_nd(z):
+    return 0.5 * z[3] * z[3] - _MUBAR / z[0]
+
+
+# Nominal energy normalization: entry interface (100 km, 7450 m/s) and the handover
+# (25 km at the target latitude, 400 m/s; the SCvx handover is ~430 m/s, speed free).
+_E0_NOM = 0.5 * (C.IC["V_mps"] / C.V_SCALE) ** 2 - _MUBAR / r_nd_from_alt(C.IC["alt_m"], C.IC["lat_deg"] * _DEG)
+_EF_NOM = 0.5 * (400.0 / C.V_SCALE) ** 2 - _MUBAR / r_nd_from_alt(C.TARGET["alt_m"], C.TARGET["lat_deg"] * _DEG)
 
 
 def _slog(x, scale):
@@ -76,7 +95,8 @@ class EntryEnvBase(gym.Env):
     def __init__(self, weights: RewardWeights = None, dt=1.0, n_substeps=3,
                  max_steps=2500, j_ref=None, seed=None, log_range_obs=True,
                  obs_version=None, exact_terminal=True, rate_saturation=True,
-                 scenario_sampler=None):
+                 scenario_sampler=None, action_mode="rate", step_mode="time",
+                 energy_steps=800, dt_max=10.0, dt_late=1.0, track_gain=2.0):
         super().__init__()
         # private copy: DummyVecEnv hands every env the same weights object, and the
         # curriculum changes weights per env (set_reward_params)
@@ -91,10 +111,25 @@ class EntryEnvBase(gym.Env):
             raise ValueError(f"obs_version must be one of {OBS_VERSIONS}")
         self.exact_terminal = bool(exact_terminal)
         self.rate_saturation = bool(rate_saturation)
+        if action_mode not in ACTION_MODES or step_mode not in STEP_MODES:
+            raise ValueError(f"action_mode in {ACTION_MODES}, step_mode in {STEP_MODES}")
+        # action_mode "target": actions are ABSOLUTE bank/AoA targets (tanh-mapped from a
+        # +-3 box, so the 40 deg AoA limit is an interior point of the policy output, not
+        # a clip boundary), tracked by the env at the actuator rate limits.
+        self.action_mode = action_mode
+        # step_mode "energy": one decision per level of a grid uniform in sqrt(energy-to-go)
+        # (fine where the dynamics are fast, incl. the terminal phase; ~constant number of
+        # decisions per episode), integrated in substeps, each step capped at dt_max.
+        self.step_mode = step_mode
+        self.energy_steps = int(energy_steps)
+        self.dt_max = float(dt_max)
+        self.dt_late = float(dt_late)
+        self.track_gain = float(track_gain)
         self.scenario_sampler = scenario_sampler
         self.J_ref = float(j_ref) if j_ref is not None else C.J_REF_BANK_ONLY
 
-        self.action_space = spaces.Box(-1.0, 1.0, shape=(self.n_actions,), dtype=np.float32)
+        lim = 3.0 if self.action_mode == "target" else 1.0
+        self.action_space = spaces.Box(-lim, lim, shape=(self.n_actions,), dtype=np.float32)
         self.observation_space = spaces.Box(-np.inf, np.inf, shape=(self._obs_dim(),),
                                             dtype=np.float32)
 
@@ -115,8 +150,10 @@ class EntryEnvBase(gym.Env):
         n = 12 + (1 if self.optimize_aoa else 0)
         if self.obs_version != "v13":
             n += 1
-        if self.obs_version == "v20":
+        if self.obs_version in ("v20", "v24"):
             n += 8
+        if self.obs_version == "v24":
+            n += 6
         return n
 
     # -- curriculum hook ------------------------------------------------------
@@ -143,6 +180,12 @@ class EntryEnvBase(gym.Env):
     def _deriv(self, z, sdot, adot):
         sigma = z[6]
         alpha_rad = z[7] if self.optimize_aoa else None
+        if self.action_mode == "target":
+            # rate-limited tracking of the commanded targets (the actuator limits)
+            sdot = float(np.clip(self.track_gain * (self._sig_t - sigma), -C.SIGMA_DOT_MAX, C.SIGMA_DOT_MAX))
+            if self.optimize_aoa:
+                adot = float(np.clip(self.track_gain * (self._alp_t - alpha_rad),
+                                     -C.ALPHA_DOT_MAX, C.ALPHA_DOT_MAX))
         if self.rate_saturation:
             # saturated integrator: forces use the bounded attitude and an outward
             # rate at a bound is zero. Without this the RK4 stages evaluate the aero
@@ -193,6 +236,97 @@ class EntryEnvBase(gym.Env):
         self._z = z
         return self.dt
 
+    # -- energy-stepped integration ---------------------------------------------
+    def energy_togo(self, z=None):
+        z = self._z if z is None else z
+        return float((_energy_nd(z) - _EF_NOM) / (_E0_NOM - _EF_NOM))
+
+    def _next_energy_level(self, e):
+        """Next level of the sqrt-uniform grid g_j = (1 - j/N)^2 strictly below e
+        (None once e <= 0: the grid is exhausted and steps fall back to dt_late)."""
+        if e <= 0.0:
+            return None
+        # tolerance in grid-index units: a step ends ON a level (secant to ~1e-9 in e),
+        # which must count as reached, or the next step would target the same level
+        j = int(np.floor((1.0 - np.sqrt(min(e, 1.0))) * self.energy_steps + 1e-5)) + 1
+        if j > self.energy_steps:
+            return None
+        return (1.0 - j / self.energy_steps) ** 2
+
+    def _path_point(self, z):
+        alt = altitude_m(z[0], z[2])
+        rho, _T, _a, _d = atmosphere(alt)
+        CL, CD = cl_cd(self._alpha_deg(z))
+        kforce = C.KFORCE
+        if self._model is not None:
+            m = self._model
+            rho, CL, CD, kforce = rho * m.k_rho, CL * m.k_CL, CD * m.k_CD, C.KFORCE / m.k_mass
+        Lnd = kforce * rho * z[3] ** 2 * CL
+        Dnd = kforce * rho * z[3] ** 2 * CD
+        return path_quantities(rho, z[3] * C.V_SCALE, Lnd, Dnd)
+
+    def _accumulate(self, z, h):
+        """Heat load (trapezoid), time-integrated capped barrier and constraint peaks
+        over one (sub)step ending at state z."""
+        w = self.w
+        Qdot, qbar, n = self._path_point(z)
+        self.J += 0.5 * (self._prev_qdot + Qdot) * h
+        self._prev_qdot = Qdot
+        bar = float(path_barrier(Qdot / C.QDOT_MAX, w.path_soft) + path_barrier(qbar / C.QBAR_MAX, w.path_soft)
+                    + path_barrier(n / C.N_MAX, w.path_soft))
+        self._step_barrier += min(bar, w.path_cap) * h
+        pk = self._peaks
+        pk["Qdot"] = max(pk["Qdot"], Qdot / C.QDOT_MAX)
+        pk["qbar"] = max(pk["qbar"], qbar / C.QBAR_MAX)
+        pk["n"] = max(pk["n"], n / C.N_MAX)
+
+    def _integrate_energy(self, sdot, adot):
+        """Advance to the next energy level (or the target-altitude crossing, or dt_max).
+        Returns the elapsed time; heat load, barrier and peaks are accumulated per substep."""
+        z = self._z
+        h = self.dt / self.n_substeps
+        level = self._next_energy_level(self.energy_togo(z))
+        cap = self.dt_max if level is not None else self.dt_late
+        self._step_barrier = 0.0
+        elapsed = 0.0
+        while True:
+            z_prev = z
+            z = self._rk4(z_prev, h, sdot, adot)
+            if self.exact_terminal and altitude_m(z[0], z[2]) <= self.tgt_alt:
+                tau = self._crossing_fraction(z_prev, z, h, sdot, adot)
+                z = self._rk4(z_prev, tau * h, sdot, adot)
+                self._accumulate(z, tau * h)
+                self._crossed = True
+                elapsed += tau * h
+                break
+            if level is not None and self.energy_togo(z) <= level:
+                tau = self._event_fraction(z_prev, z, h, sdot, adot,
+                                           lambda zz: self.energy_togo(zz) - level)
+                z = self._rk4(z_prev, tau * h, sdot, adot)
+                self._accumulate(z, tau * h)
+                elapsed += tau * h
+                break
+            self._accumulate(z, h)
+            elapsed += h
+            if elapsed >= cap - 1e-9:
+                break
+        self._z = z
+        return elapsed
+
+    def _event_fraction(self, z0, z1, h, sdot, adot, fn, iters=3):
+        """Fraction tau in (0, 1] of the substep at which fn(z) crosses 0 (secant)."""
+        f0, f1 = fn(z0), fn(z1)
+        t0, t1 = 0.0, 1.0
+        for _ in range(iters):
+            if f1 == f0:
+                break
+            t = float(np.clip(t1 - f1 * (t1 - t0) / (f1 - f0), 1e-9, 1.0))
+            ft = fn(self._rk4(z0, t * h, sdot, adot))
+            t0, f0, t1, f1 = t1, f1, t, ft
+            if abs(ft) < 1e-9:
+                break
+        return t1
+
     def _crossing_fraction(self, z0, z1, h, sdot, adot, iters=3):
         """Fraction tau in (0, 1] of the substep at which altitude reaches the
         target: secant iterations on alt(rk4(z0, tau*h)) - h_tgt. The altitude
@@ -226,7 +360,7 @@ class EntryEnvBase(gym.Env):
         Lnd = kforce * rho * z[3] ** 2 * CL
         Dnd = kforce * rho * z[3] ** 2 * CD
         Qdot, qbar, n = path_quantities(rho, Vmps, Lnd, Dnd)
-        self._c = dict(alt=alt, Vmps=Vmps, a=a_snd, Qdot=Qdot, qbar=qbar, n=n)
+        self._c = dict(alt=alt, Vmps=Vmps, a=a_snd, Qdot=Qdot, qbar=qbar, n=n, L=Lnd, D=Dnd)
 
     def _range_to_go(self):
         z = self._z
@@ -292,24 +426,44 @@ class EntryEnvBase(gym.Env):
         self._prev_G = self._angle_potential()
         self._peak_ratio = 0.0
         self._peaks = {"Qdot": 0.0, "qbar": 0.0, "n": 0.0}
+        self._step_barrier = 0.0
+        self._sig_t = z[6]                            # targets start at the current attitude
+        self._alp_t = z[7] if self.optimize_aoa else 0.0
         return self._obs(), self._info()
 
     def step(self, action):
         a = np.asarray(action, dtype=np.float64).reshape(-1)
-        sdot = float(np.clip(a[0], -1.0, 1.0)) * C.SIGMA_DOT_MAX
-        adot = (float(np.clip(a[1], -1.0, 1.0)) * C.ALPHA_DOT_MAX) if self.optimize_aoa else 0.0
+        if self.action_mode == "target":
+            u = np.tanh(np.clip(a, -3.0, 3.0))            # normalized command in (-1, 1)
+            self._sig_t = float(u[0]) * C.BANK_MAX
+            if self.optimize_aoa:
+                lo, hi = C.ALPHA_MIN * _DEG, C.ALPHA_MAX * _DEG
+                self._alp_t = 0.5 * (lo + hi) + 0.5 * (hi - lo) * float(u[1])
+            sdot = adot = 0.0                             # rates come from the tracking law
+            cmd = u
+        else:
+            sdot = float(np.clip(a[0], -1.0, 1.0)) * C.SIGMA_DOT_MAX
+            adot = (float(np.clip(a[1], -1.0, 1.0)) * C.ALPHA_DOT_MAX) if self.optimize_aoa else 0.0
+            cmd = a
 
-        dt = self._integrate(sdot, adot)
-        self.t += dt
-        self.steps += 1
-        self._update_cache()
+        if self.step_mode == "energy":
+            dt = self._integrate_energy(sdot, adot)
+            self.t += dt
+            self.steps += 1
+            self._update_cache()
+            dJ = None                                     # accumulated per substep
+        else:
+            dt = self._integrate(sdot, adot)
+            self.t += dt
+            self.steps += 1
+            self._update_cache()
+            # heat-load increment over the step (trapezoid on Qdot)
+            dJ = 0.5 * (self._prev_qdot + self._c["Qdot"]) * dt
+            self.J += dJ
+            self._prev_qdot = self._c["Qdot"]
+        self._last_dt = dt
 
-        # heat-load increment over the step (trapezoid on Qdot)
-        dJ = 0.5 * (self._prev_qdot + self._c["Qdot"]) * dt
-        self.J += dJ
-        self._prev_qdot = self._c["Qdot"]
-
-        reward, terminated, truncated, tinfo = self._reward(dJ, a)
+        reward, terminated, truncated, tinfo = self._reward(dJ, cmd)
         info = self._info()
         info.update(tinfo)
         return self._obs(), float(reward), bool(terminated), bool(truncated), info
@@ -346,14 +500,19 @@ class EntryEnvBase(gym.Env):
             r -= w.w_endsmooth * da2
 
         # path constraints: capped soft barrier (zero when feasible)
-        bar = float(path_barrier(c["Qdot"] / C.QDOT_MAX, w.path_soft)
-                    + path_barrier(c["qbar"] / C.QBAR_MAX, w.path_soft)
-                    + path_barrier(c["n"] / C.N_MAX, w.path_soft))
-        r -= w.w_path * min(bar, w.path_cap)
         pk = self._peaks
-        pk["Qdot"] = max(pk["Qdot"], c["Qdot"] / C.QDOT_MAX)
-        pk["qbar"] = max(pk["qbar"], c["qbar"] / C.QBAR_MAX)
-        pk["n"] = max(pk["n"], c["n"] / C.N_MAX)
+        if self.step_mode == "energy":
+            # time-integrated over the substeps (per second, = the 1 s step of time mode),
+            # so long and short energy steps are charged consistently; peaks per substep
+            r -= w.w_path * self._step_barrier
+        else:
+            bar = float(path_barrier(c["Qdot"] / C.QDOT_MAX, w.path_soft)
+                        + path_barrier(c["qbar"] / C.QBAR_MAX, w.path_soft)
+                        + path_barrier(c["n"] / C.N_MAX, w.path_soft))
+            r -= w.w_path * min(bar, w.path_cap)
+            pk["Qdot"] = max(pk["Qdot"], c["Qdot"] / C.QDOT_MAX)
+            pk["qbar"] = max(pk["qbar"], c["qbar"] / C.QBAR_MAX)
+            pk["n"] = max(pk["n"], c["n"] / C.N_MAX)
         self._peak_ratio = max(pk.values())
 
         terminated = truncated = False
@@ -467,7 +626,7 @@ class EntryEnvBase(gym.Env):
         # Kept LAST so older policies map onto a zero-padded input column.
         if self.obs_version != "v13":
             feats.append(np.log10(max(self._range_to_go() / 1000.0, 0.1)) / 4.0)
-        if self.obs_version == "v20":
+        if self.obs_version in ("v20", "v24"):
             dfpa = np.rad2deg(z[4] - self.tgt_fpa)
             dpsi_rad = _wrap_pi(z[5] - self.tgt_psi)
             dpsi = np.rad2deg(dpsi_rad)
@@ -479,6 +638,17 @@ class EntryEnvBase(gym.Env):
                 _slog(dpsi, 0.09) / 3.3,                      #   resolution to 0.09 deg (0.1 %)
                 np.log10(max(c["alt"] - self.tgt_alt, 1.0)) / 5.0,   # altitude-to-go [m]
                 np.sin(brg), np.cos(brg),                     # target bearing vs final heading
+            ]
+        if self.obs_version == "v24":
+            e = self.energy_togo(z)
+            de_nd = max(_energy_nd(z) - _EF_NOM, 1e-6)
+            feats += [
+                e,                                            # energy-to-go (1 -> ~0)
+                np.sqrt(max(e, 0.0)),                         #   decision-grid coordinate
+                np.log10(max(e, 1e-4)) / 4.0,                 #   resolution near the handover
+                min((self._range_to_go() / C.R0) / de_nd, 5.0) / 5.0,   # range per energy-to-go
+                min(c["D"], 5.0) / 2.5,                       # measured drag acceleration [g]
+                min(c["L"] / max(c["D"], 1e-9), 4.0) / 2.0,   # measured L/D
             ]
         return np.asarray(feats, dtype=np.float32)
 
@@ -499,4 +669,6 @@ class EntryEnvBase(gym.Env):
             "qbar_Pa": c["qbar"],
             "n_g": c["n"],
             "J_heat": self.J,
+            "energy_togo": self.energy_togo(z),
+            "dt_s": getattr(self, "_last_dt", 0.0),
         }
