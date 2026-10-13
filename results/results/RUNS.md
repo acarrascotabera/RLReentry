@@ -883,3 +883,30 @@ level 1 (heading 52-61 deg off, needs 45).
 The second warm-restart segment halved the realistic-test error again (IQM 7.8 -> 4.2 km)
 and the SCvx-scenario median (64 -> 39 km); no case within 1 km yet, and the constraint
 tail of the final model widened (p95 1.07 -> 1.16).
+
+## Reformulation era (2026-10-13): energy decisions, absolute attitude targets, from scratch
+
+### v24 — running (launched 2026-10-13 12:22): cold start, 20M decisions
+
+No warm start. New formulation (commits 32e542e, 4ee0da6):
+- **Energy as the independent variable** (`--step-mode energy --energy-steps 800`): one
+  decision per level of a grid uniform in sqrt(normalized energy-to-go), integrated in 1/3 s
+  substeps (boundary at substep resolution, handover crossing exact), steps capped at 10 s;
+  ~817 decisions per nominal episode, ~190 in the last 200 s. Fixed-dE steps were rejected:
+  dissipation ~ D*V, so they leave only ~87 decisions in the last 200 s. Heat load, barrier
+  (time-integrated) and constraint peaks accumulated per substep. Constant-target check:
+  identical trajectory to time stepping (heat load to 8e-8).
+- **Absolute attitude targets** (`--action-mode target`): bank target in +-85 deg and AoA target
+  in [5, 40] deg, tanh-mapped from a +-3 action box and tracked by the env at the actuator
+  limits (45 / 15 deg/s). Holding 40 deg AoA is interior to the policy output (no dead zone).
+  WB001 aero: max L/D 2.01 at 17 deg, 1.07 at 40 deg (max lift/drag); SCvx holds 40 deg until
+  t ~ 1325 s (V ~ 2 km/s) and lands at 28.6 deg.
+- **obs v24** (28): v20 + energy-to-go (linear, sqrt, log), range per energy-to-go, measured
+  drag acceleration and L/D.
+- **Curriculum v24** (loosened): first angle level passes at |dfpa| <= 20 deg, |dpsi| <= 65 deg
+  (v23: 10 / 45, never passed); explicit tightening thresholds per level.
+- PID-Lagrangian with cap 4000 and a 2M-decision warm-up at lam = 200 (a cold policy violates
+  heat rate by ~2x in every episode); dispersion training (ic+models, 0.1x VISTA) from the start.
+- PPO: 512x512, lr 3e-4 decayed, n_steps 2048 x 8, batch 512, 5 epochs, gamma 0.9995,
+  lambda 0.95, clip 0.2, ent 0.005, target_kl 0.05, action std 0.5.
+Throughput ~150-160 decisions/s at start (random policies loft: long, slow, capped steps).

@@ -1,0 +1,191 @@
+{
+  "stage": "stage2",
+  "timesteps": 20000000,
+  "n_envs": 8,
+  "n_substeps": 3,
+  "subproc": true,
+  "seed": 4,
+  "j_ref": 1071990730.0,
+  "lr_decay": true,
+  "hpo_best": null,
+  "lr_base": 0.0003,
+  "init_model": null,
+  "init_vn": null,
+  "ppo": {
+    "learning_rate": "schedule",
+    "n_steps": 2048,
+    "batch_size": 512,
+    "n_epochs": 5,
+    "gamma": 0.9995,
+    "gae_lambda": 0.95,
+    "clip_range": 0.2,
+    "ent_coef": 0.005,
+    "vf_coef": 0.5,
+    "max_grad_norm": 0.5,
+    "target_kl": 0.05
+  },
+  "ppo_effective": {
+    "gamma": 0.9995,
+    "gae_lambda": 0.95,
+    "n_steps": 2048,
+    "batch_size": 512,
+    "n_epochs": 5,
+    "ent_coef": 0.005,
+    "target_kl": 0.05
+  },
+  "net_arch": [
+    512,
+    512
+  ],
+  "action_std": "0.5",
+  "env_kwargs": {
+    "exact_terminal": true,
+    "rate_saturation": true,
+    "obs_version": "v24",
+    "action_mode": "target",
+    "step_mode": "energy",
+    "energy_steps": 800
+  },
+  "val_set": "S2_val_x0.1",
+  "score_mode": "full",
+  "train_dispersion": {
+    "groups": [
+      "ic",
+      "models"
+    ],
+    "sigma_scale": 0.1
+  },
+  "lagrangian": {
+    "budget": 0.005,
+    "kp": 2000.0,
+    "ki": 1000.0,
+    "kd": 0.0,
+    "lam_init": 200.0,
+    "lam_max": 4000.0,
+    "start_step": 2000000
+  },
+  "curriculum": {
+    "preset": "v24",
+    "min_steps": 300000,
+    "pass_frac": 0.75,
+    "levels": [
+      {
+        "w_ang_mult": 0.0,
+        "w_succ_fpa": 0.0,
+        "w_succ_psi": 0.0,
+        "_d_pass_km": 30.0,
+        "_check_angles": false,
+        "_pass_frac": 0.5
+      },
+      {
+        "w_ang_mult": 0.25,
+        "fpa_ramp_deg": 20.0,
+        "psi_ramp_deg": 90.0,
+        "w_succ_fpa": 250.0,
+        "w_succ_psi": 250.0,
+        "_d_pass_km": 30.0,
+        "_fpa_pass_deg": 20.0,
+        "_psi_pass_deg": 65.0,
+        "_pass_frac": 0.5
+      },
+      {
+        "w_ang_mult": 0.5,
+        "fpa_ramp_deg": 10.0,
+        "psi_ramp_deg": 45.0,
+        "w_succ_fpa": 250.0,
+        "w_succ_psi": 250.0,
+        "_d_pass_km": 25.0,
+        "_fpa_pass_deg": 12.0,
+        "_psi_pass_deg": 45.0,
+        "_pass_frac": 0.5
+      },
+      {
+        "w_ang_mult": 1.0,
+        "fpa_ramp_deg": 5.0,
+        "psi_ramp_deg": 20.0,
+        "w_succ_fpa": 250.0,
+        "w_succ_psi": 250.0,
+        "_d_pass_km": 20.0,
+        "_fpa_pass_deg": 6.0,
+        "_psi_pass_deg": 25.0,
+        "_pass_frac": 0.5
+      },
+      {
+        "w_ang_mult": 1.0,
+        "fpa_ramp_deg": 2.0,
+        "psi_ramp_deg": 8.0,
+        "w_succ_fpa": 250.0,
+        "w_succ_psi": 250.0,
+        "_d_pass_km": 10.0,
+        "_fpa_pass_deg": 3.0,
+        "_psi_pass_deg": 10.0,
+        "_pass_frac": 0.5
+      },
+      {
+        "w_ang_mult": 1.0,
+        "fpa_ramp_deg": 0.5,
+        "psi_ramp_deg": 2.0,
+        "w_succ_fpa": 250.0,
+        "w_succ_psi": 250.0,
+        "_d_pass_km": 5.0,
+        "_fpa_pass_deg": 1.0,
+        "_psi_pass_deg": 3.0,
+        "_pass_frac": 0.5
+      },
+      {
+        "w_ang_mult": 1.0,
+        "fpa_ramp_deg": 0.1,
+        "psi_ramp_deg": 0.5,
+        "w_succ_fpa": 250.0,
+        "w_succ_psi": 250.0,
+        "_d_pass_km": 2.0,
+        "_fpa_pass_deg": 0.25,
+        "_psi_pass_deg": 1.0,
+        "_pass_frac": 0.5
+      }
+    ],
+    "base": {
+      "w_succ_fpa": 250.0,
+      "w_succ_psi": 250.0
+    }
+  },
+  "reward_weights": {
+    "w_pos": 100.0,
+    "w_near": 300.0,
+    "d_near_km": 50.0,
+    "w_lin": 40.0,
+    "d_lin_km": 10.0,
+    "near_convexity": 0.5,
+    "w_succ": 500.0,
+    "succ_ramp_km": 6.0,
+    "w_far": 2.0,
+    "d_far_km": 500.0,
+    "w_fail": 50.0,
+    "w_smooth": 25.0,
+    "w_endsmooth": 1.0,
+    "endsmooth_alt_m": 35000.0,
+    "w_path": 1.0,
+    "path_soft": 0.9,
+    "path_cap": 3.0,
+    "w_peak": 0.0,
+    "lam_Qdot": 200.0,
+    "lam_qbar": 200.0,
+    "lam_n": 200.0,
+    "w_ang_mult": 0.0,
+    "fpa_lin_deg": 2.0,
+    "w_fpa_lin": 100.0,
+    "w_fpa_log": 300.0,
+    "psi_lin_deg": 10.0,
+    "w_psi_lin": 20.0,
+    "w_psi_log": 300.0,
+    "ang_convexity": 0.5,
+    "psi_gate_hi_km": 1000.0,
+    "psi_gate_lo_km": 200.0,
+    "fpa_gate_hi_km": 40.0,
+    "fpa_gate_lo_km": 28.0,
+    "w_succ_fpa": 0.0,
+    "fpa_ramp_deg": 20.0,
+    "w_succ_psi": 0.0,
+    "psi_ramp_deg": 90.0
+  }
+}
