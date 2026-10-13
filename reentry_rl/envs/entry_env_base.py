@@ -300,11 +300,11 @@ class EntryEnvBase(gym.Env):
                 elapsed += tau * h
                 break
             if level is not None and self.energy_togo(z) <= level:
-                tau = self._event_fraction(z_prev, z, h, sdot, adot,
-                                           lambda zz: self.energy_togo(zz) - level)
-                z = self._rk4(z_prev, tau * h, sdot, adot)
-                self._accumulate(z, tau * h)
-                elapsed += tau * h
+                # decision boundary at substep resolution (<= 1/3 s past the level): the
+                # grid only schedules decisions, so no event location (the handover
+                # crossing above stays exact)
+                self._accumulate(z, h)
+                elapsed += h
                 break
             self._accumulate(z, h)
             elapsed += h
