@@ -961,3 +961,15 @@ dispersion training, selection) plus:
 - **Far field**: linear w_far = 2/km extended to d_far = 1,500 km (covers the noisy lift-up
   start at ~1,000 km).
 Legacy paths unchanged (HPO-best regression return -660.1399573458849 identical to HEAD).
+
+**v24b progress (2026-10-14 00:00, 6M).** Validation median 412 km (0.25M) -> 300-460 km
+plateau (to 2.75M) -> 85 km (3.25M) -> 16 km (4.75M, curriculum level 0 -> 1) -> 4.2 km
+(6M, level 1 -> 2; score 25.2). Monte Carlo of the 6M best (snap_best_6M, eval_mc_best_6M):
+
+| model | nominal | realistic S3 median (IQM, 95 % CI) | <= 5 / 10 km | feasible & <= 5 km | peak p95 | feasible | viol. Qdot / n | median abs dfpa / dpsi | AoA mean (std, min) |
+|---|---|---|---|---|---|---|---|---|---|
+| v23 20M final | 3.26 | 4.17 (4.15, [4.01, 4.33]) | 71 % / 89 % | 57 % | 1.162 | 75 % | 14 % / 13 % | 15.3 / 58.6 deg | 40.0 (0.0, 40.0) |
+| v24b 6M best | 3.57 | 3.93 (3.88, [3.77, 4.01]) | 84 % / 95 % | 70 % | 1.012 | 80 % | 19 % / 0.2 % | 20.3 / 34.7 deg | 39.1 (1.0, 36.6) |
+
+From scratch in 6M decisions v24b matches/exceeds the v23 chain at 20M (itself warm-started
+from older models) on position and constraints; heading better, FPA worse (gamma_f ~ -30 deg).
