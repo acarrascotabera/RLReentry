@@ -22,14 +22,15 @@ import matplotlib.pyplot as plt
 
 ROOT = Path(__file__).resolve().parents[2]
 RES = ROOT / "results"
-C = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]
+C = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#7d5bd6"]
 INK, INK2, GRID, SURFACE = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
 
 POLICIES = [("v21 best (nominal training, 29.2M)", RES / "stage2_v21/eval_mc_best_29p2M"),
             ("v22 best (dispersion training)", RES / "stage2_v22/eval_mc_best"),
-            ("v23 10M best (+ Lagrangian, early angles)", RES / "stage2_v23/eval_mc_best_8p75M"),
-            ("v23 20M best (16.5M)", RES / "stage2_v23/eval_mc_best_16p5M"),
-            ("v23 20M final", RES / "stage2_v23/eval_mc_final_20M")]
+            ("v23 20M final (+ Lagrangian, early angles)", RES / "stage2_v23/eval_mc_final_20M"),
+            ("v24b 6M best (energy, absolute targets; scratch)", RES / "stage2_v24b/eval_mc_best_6M"),
+            ("v24b best (18.5M)", RES / "stage2_v24b/eval_mc_best_18p5M"),
+            ("v24b 20M final", RES / "stage2_v24b/eval_mc_final_20M")]
 
 
 def _cdf(ax, d, color, label, ls="-"):
@@ -51,7 +52,7 @@ def _style(ax):
 
 
 def main():
-    fig, axes = plt.subplots(1, 2, figsize=(13, 5), facecolor=SURFACE)
+    fig, axes = plt.subplots(1, 2, figsize=(13, 6.6), facecolor=SURFACE)
     for ax, set_name, title in ((axes[0], "S3_test_ic_models_x0.1", "realistic dispersions (500 cases, 0.1x VISTA)"),
                                 (axes[1], "SCVX_gc_ic_tc", "SCvx gc_ic_tc campaign scenarios (1001, VISTA)")):
         _style(ax)
@@ -68,9 +69,11 @@ def main():
         ax.set_xlabel("landing error at the 25 km handover [km]")
         ax.set_ylabel("fraction of cases")
         ax.set_title(title, fontsize=9, loc="left", color=INK)
-        ax.legend(fontsize=7.5, frameon=False, loc="upper left", labelcolor=INK)
+        ax.legend(fontsize=7.5, frameon=False, labelcolor=INK, loc="upper left",
+                  bbox_to_anchor=(0.0, -0.16), ncol=1)
     fig.suptitle("Landing-error distributions on identical scenarios", fontsize=11, color=INK, x=0.01, ha="left")
     fig.tight_layout(rect=[0, 0, 1, 0.95])
+    fig.subplots_adjust(bottom=0.33)
     out = RES / "curves" / "mc_comparison.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=150, facecolor=SURFACE)

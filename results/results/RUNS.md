@@ -983,3 +983,53 @@ Resumed (`--resume --curriculum v24b`, same LR schedule: 1.42e-4 at 10.5M) with 
 ramps widened to ~2.5x the pass thresholds (levels 2-6: 30/15/8/2.5/0.6 deg); level,
 multipliers (lam_Qdot 3976, lam_n 861) and selection best (25.2 at 6M) carried over.
 Log: train_log_resume1.txt.
+
+**v24b outcome — done (20M, 2026-10-14 18:52; 766.7 min of training in two segments).**
+Curriculum advances at 4.75M, 6M, 15.75M, 16.25M, 18.75M (ends at level 5 of 6: pass needs
+d <= 5 km, |dfpa| <= 1 deg, |dpsi| <= 3 deg). After the FPA-ramp fix (resume at 10.5M) the
+median validation FPA error fell 28 -> 1-3 deg in 6M decisions while the position held at
+1.3-2.8 km. Best by score at 18.5M (6.79: d 2.14 km, dfpa 2.4, dpsi 2.4 deg nominal); final
+nominal 1.25 km, dfpa 2.31, dpsi 7.07 deg, J/J_ref 1.19 (heat load is not in the objective;
+v23 0.996). AoA spread along the rollout grew 0.2 -> ~4 deg (modulated from 6M). PPO health:
+approx_kl median 0.0044 (no update above 1.5x target), explained variance 0.999, action std
+0.50 -> 0.25. Last 2M: validation log10 d still falling (-0.11 / M), return flat (level 5).
+The load factor was the price of the shallower arrival: lam_n 900 -> 3,730 from 15M.
+
+Monte Carlo (eval_mc_best_18p5M, eval_mc_final_20M; tables built from the per-case CSVs):
+
+Realistic test S3_test_ic_models_x0.1 (500):
+
+| model | median km | IQM [95 % CI] | <=1 / 5 / 10 km | feasible | feas. & <=5 km | peak p95 | viol. Qdot/qbar/n | median abs dfpa / dpsi | pos_1km / rel_1pct / vista_mc |
+|---|---|---|---|---|---|---|---|---|---|
+| v23 20M final | 4.17 | 4.15 [4.00, 4.32] | 0 / 71 / 89 % | 75 % | 57 % | 1.162 | 14/0/13 % | 15.3 / 58.6 deg | 0 / 0 / 0 % |
+| v24b 6M best | 3.93 | 3.88 [3.75, 4.00] | 0 / 84 / 95 % | 80 % | 70 % | 1.012 | 19/0/0 % | 20.4 / 34.7 deg | 0 / 0 / 0 % |
+| v24b 18.5M best | 2.22 | 2.29 [2.17, 2.43] | 3 / 96 / 100 % | 79 % | 77 % | 1.015 | 19/0/2 % | 1.69 / 2.63 deg | 3.0 / 0.4 / 18.0 % |
+| **v24b 20M final** | **1.59** | **1.67 [1.59, 1.77]** | **12 / 98 / 100 %** | 74 % | 73 % | 1.018 | 22/0/4 % | 2.12 / 4.56 deg | 7.6 / 0.2 / 5.0 % |
+
+SCvx gc_ic_tc campaign scenarios (1001, full VISTA dispersions = 10x the training scale):
+
+| model | median km | IQM [95 % CI] | <=1 / 5 / 10 km | feasible | feas. & <=5 km | peak p95 | median abs dfpa / dpsi | pos_1km / rel_1pct / rel_0.1pct |
+|---|---|---|---|---|---|---|---|---|
+| SCvx closed-loop G&C | 0.21 | 1.93 [1.20, 2.75] | 62 / 67 / 71 % | 39 % | 21 % | 1.157 | 0.30 / 0.62 deg | 19.1 / 7.1 / 0.8 % |
+| v23 20M final | 38.8 | 52.9 [45.5, 61.6] | 0 / 6 / 18 % | 31 % | 3 % | 1.604 | 15.9 / 63.5 deg | 0 / 0 / 0 % |
+| v24b 18.5M best | 14.3 | 15.2 [13.9, 16.4] | 2 / 24 / 42 % | 30 % | 8 % | 1.738 | 4.3 / 13.1 deg | 0.2 / 0 / 0 % |
+| v24b 20M final | 12.6 | 13.3 [12.1, 14.6] | 2 / 29 / 46 % | 32 % | 8 % | 1.614 | 4.8 / 10.9 deg | 0.6 / 0 / 0 % |
+
+Other sets (v24b final vs v23 final): S3_test_ic_models (1x, 500) median 20.7 vs 203 km,
+IQM 24.8 vs 335 km, feasible 25 vs 20 %; SCVX_gc_models (501) median 9.95 vs 231 km
+(SCvx 0.33 km), feasible 35 vs 25 % (SCvx 34 %); S1_sweep_x0.1 median 1.31 vs 3.84 km,
+100 vs 86 % within 5 km. 1x sweep: the largest errors come from lift (k_CL, up to 2,155 km
+at the extreme multiplier), entry speed (peak ratio up to 2.9), entry altitude, drag and
+density — v23's worst sweep errors were 3,500 km (k_CL) and 2,310 km (k_CD).
+
+Conclusions: (1) the reformulation (energy-indexed decisions, absolute attitude targets,
+Markov Lagrangian charge, attitude-hold initialization) trained from scratch beats the whole
+warm-started v20-v23 chain on every metric on the realistic test: 2.5x lower landing error,
+7x lower FPA error, 13x lower heading error, constraint tail p95 1.16 -> 1.02; (2) the FPA
+plateau of v23/v24b-level-2 was a reward-shaping defect (bonus ramp narrower than the
+error), not a capability limit; (3) the 0.1 % tolerance is still unmet (0 %): the angles
+are ~2 deg / ~4 deg against 0.01 / 0.09 deg; (4) at the full VISTA dispersions the policy is
+out of its training distribution — SCvx is far more precise in its successful cases (62 %
+within 1 km) while the RL tail is shorter (RL beats SCvx beyond ~40 km) and feasibility is
+comparable (32 vs 39 %); (5) heat rate stays the binding path constraint (1.6 % nominal
+margin at the best attitude; 22 % of realistic cases exceed it, p95 1.018).
