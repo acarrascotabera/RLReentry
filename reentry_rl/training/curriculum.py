@@ -33,6 +33,12 @@ Preset "v24" loosens the angle pass criteria (v23 sat on its first angle level f
 carries explicit pass thresholds ("_fpa_pass_deg", "_psi_pass_deg") instead of
 half the bonus ramp, starting at 20 deg / 65 deg and tightening level by level.
 
+Preset "v24b" widens the FPA bonus ramps of v24 to ~2.5x the pass threshold (levels 2-6:
+10/5/2/0.5/0.1 -> 30/15/8/2.5/0.6 deg). The concave bonus w*(1 - (dgamma/ramp)^2)^+ is
+zero beyond the ramp, so with v24's ramp equal to (or below) the pass threshold a policy
+that arrives 17-29 deg off (v24b at level 2: ramp 10 deg) gets no FPA bonus gradient at
+all and trades FPA for position (steeper terminal dive). Heading ramps unchanged.
+
 Weights are pushed to every training env with env_method("set_reward_params")
 and take effect at each env's next reset. The level history is written to
 <run>/eval/curriculum.csv and the current level to <run>/curriculum_state.json
@@ -75,6 +81,11 @@ PRESETS["v24"] = dict(
            + [{"w_ang_mult": c, "fpa_ramp_deg": f, "psi_ramp_deg": q, "w_succ_fpa": 250.0,
                "w_succ_psi": 250.0, "_d_pass_km": d, "_fpa_pass_deg": fp, "_psi_pass_deg": qp,
                "_pass_frac": 0.5} for c, f, q, d, fp, qp in _V24])
+_FPA_RAMP_V24B = [20.0, 30.0, 15.0, 8.0, 2.5, 0.6]       # angle levels 1-6
+PRESETS["v24b"] = dict(
+    base=dict(PRESETS["v24"]["base"]),
+    levels=[dict(PRESETS["v24"]["levels"][0])]
+           + [{**lv, "fpa_ramp_deg": r} for lv, r in zip(PRESETS["v24"]["levels"][1:], _FPA_RAMP_V24B)])
 PRESETS["v20r"] = dict(
     base=dict(PRESETS["v20"]["base"]),
     levels=[{"w_ang_mult": 0.0, "w_succ_fpa": 0.0, "w_succ_psi": 0.0,

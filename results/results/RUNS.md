@@ -973,3 +973,13 @@ plateau (to 2.75M) -> 85 km (3.25M) -> 16 km (4.75M, curriculum level 0 -> 1) ->
 
 From scratch in 6M decisions v24b matches/exceeds the v23 chain at 20M (itself warm-started
 from older models) on position and constraints; heading better, FPA worse (gamma_f ~ -30 deg).
+
+**v24b resumed (2026-10-14 06:04, at 10.5M -> 20M, curriculum preset v24b).** Level 2 from
+6M to 10.5M: position kept improving (validation median 1.5-3.2 km from 8.75M) and heading
+converged (|dpsi| 4-12 deg, from 30-75 deg), but FPA did not move (|dfpa| 17-29 deg against
+the 12 deg pass threshold; return flat at ~3.5k for 2M decisions). The v24 level-2 FPA
+bonus ramp (10 deg) is narrower than the error, so the concave bonus gave no gradient.
+Resumed (`--resume --curriculum v24b`, same LR schedule: 1.42e-4 at 10.5M) with the FPA
+ramps widened to ~2.5x the pass thresholds (levels 2-6: 30/15/8/2.5/0.6 deg); level,
+multipliers (lam_Qdot 3976, lam_n 861) and selection best (25.2 at 6M) carried over.
+Log: train_log_resume1.txt.
