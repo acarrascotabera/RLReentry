@@ -1033,3 +1033,11 @@ out of its training distribution — SCvx is far more precise in its successful 
 within 1 km) while the RL tail is shorter (RL beats SCvx beyond ~40 km) and feasibility is
 comparable (32 vs 39 %); (5) heat rate stays the binding path constraint (1.6 % nominal
 margin at the best attitude; 22 % of realistic cases exceed it, p95 1.018).
+
+### v24b resumed (2) — running (2026-10-15 11:05): +10M decisions (to 30M), LR warm restart
+
+`--resume results/stage2_v24b --timesteps 10000000 --lr-decay --lr-restart` with the same
+env/reward flags, curriculum v24b (continues at level 5: pass at d <= 5 km, |dfpa| <= 1 deg,
+|dpsi| <= 3 deg on 50 % of the validation cases), PID-Lagrangian restored (lam_Qdot 3161,
+lam_n 3733), dispersion training 0.1x, selection best carried over (6.79 at 18.5M). LR back
+to 3e-4 at 20M, decaying linearly to 0 at 30M. Log: train_log_resume2.txt.
