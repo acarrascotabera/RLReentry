@@ -2,7 +2,7 @@
  "preset": "v24b",
  "level": 5,
  "level_start": 18750000,
- "step": 20000000,
+ "step": 20750000,
  "params": {
   "w_succ_fpa": 250.0,
   "w_succ_psi": 250.0,

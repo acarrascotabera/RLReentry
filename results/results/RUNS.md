@@ -1034,10 +1034,23 @@ within 1 km) while the RL tail is shorter (RL beats SCvx beyond ~40 km) and feas
 comparable (32 vs 39 %); (5) heat rate stays the binding path constraint (1.6 % nominal
 margin at the best attitude; 22 % of realistic cases exceed it, p95 1.018).
 
-### v24b resumed (2) — running (2026-10-15 11:05): +10M decisions (to 30M), LR warm restart
+### v24b resumed (2) — aborted at 20.82M (2026-10-15 11:05 - 13:05): LR warm restart at 3e-4
 
 `--resume results/stage2_v24b --timesteps 10000000 --lr-decay --lr-restart` with the same
 env/reward flags, curriculum v24b (continues at level 5: pass at d <= 5 km, |dfpa| <= 1 deg,
 |dpsi| <= 3 deg on 50 % of the validation cases), PID-Lagrangian restored (lam_Qdot 3161,
 lam_n 3733), dispersion training 0.1x, selection best carried over (6.79 at 18.5M). LR back
 to 3e-4 at 20M, decaying linearly to 0 at 30M. Log: train_log_resume2.txt.
+
+Aborted: the restart peak was the run's lr_base, 3e-4 (the cold-start LR) — 3x the 1e-4
+peak of v23's warm restarts — on a converged policy (action std 0.24). Within 0.8M
+decisions: return 3,950 -> 2,090, validation median 1.9 -> 33 km (|dfpa| 2.6 -> 13 deg),
+lam_n at the 4,000 cap (load-factor excess 9 %), clip fraction 0.065 -> 0.14, approx_kl
+up to 0.02. Rolled back to the 20M checkpoint (ckpt/snapshots/eval-history rows after 20M,
+Lagrange state and logs moved to aborted_restart_lr3e-4/; Lagrange state restored to its
+20M values). `--lr` now sets lr_base on --resume (the restart peak).
+
+### v24b resumed (3) — running (2026-10-15 13:07): +10M decisions (to 30M), LR restart at 1e-4
+
+Same as (2) but `--lr 1e-4` (v23's restart peak), decaying to 0 at 30M. Log:
+train_log_resume2.txt. Throughput ~130 decisions/s (two MATLAB processes share the CPU).

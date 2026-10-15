@@ -189,6 +189,10 @@ def main():
             if k in RewardWeights.__dataclass_fields__:
                 setattr(weights, k, v)
         lr_base = rc.get("lr_base", DEFAULT_PPO["learning_rate"])
+        if args.lr is not None:
+            # --lr on resume sets the schedule's base, i.e. the peak of a --lr-restart
+            # (v24b: restarting a converged policy at the cold-start 3e-4 destabilized it)
+            lr_base = args.lr
         cks = sorted((outdir / "ckpt").glob("ppo_*_steps.zip"),
                      key=lambda p: int(re.search(r"_(\d+)_steps", p.name).group(1)))
         if not cks:

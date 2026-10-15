@@ -13,6 +13,15 @@
   "extra_steps": 10000000,
   "lr_restart": true,
   "lr_at_resume": 0.0003,
-  "started": "2026-10-15T11:07:00"
+  "started": "2026-10-15T11:07:00",
+  "aborted": "stopped at 20.82M: LR restart to 3e-4 (3x v23's 1e-4 peak) destabilized the policy (validation median 2 -> 33 km, return 3950 -> 2090); artifacts in aborted_restart_lr3e-4/"
+ },
+ {
+  "resumed_from": "ppo_20000000_steps.zip",
+  "at_steps": 20000000,
+  "extra_steps": 10000000,
+  "lr_restart": true,
+  "lr_at_resume": 0.00010000000000000002,
+  "started": "2026-10-15T13:08:53"
  }
 ]
