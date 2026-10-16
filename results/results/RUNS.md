@@ -1050,7 +1050,42 @@ up to 0.02. Rolled back to the 20M checkpoint (ckpt/snapshots/eval-history rows 
 Lagrange state and logs moved to aborted_restart_lr3e-4/; Lagrange state restored to its
 20M values). `--lr` now sets lr_base on --resume (the restart peak).
 
-### v24b resumed (3) — running (2026-10-15 13:07): +10M decisions (to 30M), LR restart at 1e-4
+### v24b resumed (3) — done (2026-10-15 13:07 - 2026-10-16 03:38): +10M decisions (to 30M), LR restart at 1e-4
 
 Same as (2) but `--lr 1e-4` (v23's restart peak), decaying to 0 at 30M. Log:
 train_log_resume2.txt. Throughput ~130 decisions/s (two MATLAB processes share the CPU).
+
+**v24b resumed (3) outcome (30M; 869.2 min).** Stable restart (approx_kl median 0.0042, no
+update above 1.5x target over the whole run; clip fraction 0.02-0.07). New bests by score
+5.40 (24.5M) and 4.42 (26.75M: validation median 1.74 km, dfpa 1.05, dpsi 0.36 deg); the
+final model (30M) reaches the nominal handover 0.91 km off (first nominal < 1 km), dfpa
+1.40 deg, dpsi 0.03 deg, J/J_ref 1.22. Curriculum stayed at level 5 (heading met its 3 deg
+threshold, FPA hovered at the 1 deg threshold). Load factor went from binding (lam_n at the
+4,000 cap, 21-24M) to within budget (excess ~0.1 %, lam_n 3,012 at 30M); lam_Qdot released
+3,161 -> 1,985. Last 2M: validation log10 d slope -0.04 / M, return flat (~4.19k).
+
+| S3_test_ic_models_x0.1 (500) | median km | IQM [95 % CI] | <=1 / 5 / 10 km | feasible | feas. & <=5 km | peak p95 | viol. Qdot/qbar/n | median abs dfpa / dpsi | pos_1km / rel_1pct / vista_mc |
+|---|---|---|---|---|---|---|---|---|---|
+| v23 20M final | 4.17 | 4.15 [4.01, 4.33] | 0 / 71 / 89 % | 75 % | 57 % | 1.162 | 14/0/13 % | 15.3 / 58.6 deg | 0 / 0 / 0 % |
+| v24b 20M final | 1.59 | 1.67 [1.59, 1.77] | 12 / 98 / 100 % | 74 % | 73 % | 1.018 | 22/0/4 % | 2.12 / 4.56 deg | 7.6 / 0.2 / 5.0 % |
+| v24b 26.75M best | 1.78 | 1.85 [1.75, 1.95] | 10 / 99 / 100 % | 77 % | 76 % | 1.012 | 23/0/0 % | 0.74 / 1.82 deg | 8.0 / 1.8 / 32.8 % |
+| **v24b 30M final** | **1.36** | **1.36 [1.31, 1.41]** | **24 / 100 / 100 %** | **79 %** | **79 %** | **1.011** | 21/0/0 % | 1.16 / 2.77 deg | 16.6 / 1.8 / 29.8 % |
+
+| SCVX_gc_ic_tc (1001) | median km | IQM [95 % CI] | <=1 / 5 / 10 km | feasible | feas. & <=5 km | peak p95 | median abs dfpa / dpsi | pos_1km / rel_1pct / rel_0.1pct / vista_mc |
+|---|---|---|---|---|---|---|---|---|
+| SCvx closed-loop G&C | 0.21 | 1.93 [1.25, 2.73] | 62 / 67 / 71 % | 39 % | 21 % | 1.157 | 0.30 / 0.62 deg | 19.1 / 7.1 / 0.8 / 18.7 % |
+| v24b 20M final | 12.6 | 13.3 [12.2, 14.7] | 2 / 29 / 46 % | 32 % | 8 % | 1.614 | 4.8 / 10.9 deg | 0.6 / 0 / 0 / 1.3 % |
+| v24b 30M final | 10.5 | 12.3 [11.2, 13.5] | 2 / 28 / 49 % | 34 % | 10 % | 1.777 | 5.0 / 10.9 deg | 0.3 / 0.1 / 0 / 3.0 % |
+
+Other sets (30M final vs 20M final): SCVX_gc_models median 5.29 vs 9.95 km (IQM 6.45 vs
+10.7; SCvx 0.33 km, 3.06), feasible 35 % (SCvx 34 %); S3_test_ic_models (1x) median 13.9 vs
+20.7 km; S1_sweep_x0.1 median 1.04 vs 1.31 km, 38 % within 1 km; S1_sweep median 3.66 vs
+4.57 km. The 26.75M best has the smallest angle errors on the realistic test (0.74 / 1.82
+deg, 32.8 % within the VISTA MC tolerance); the 30M final the smallest landing error.
+
+Conclusions: the 1e-4 warm restart cut the realistic-test landing error 1.67 -> 1.36 km
+(IQM; 24 % within 1 km), the angles ~2x (FPA 2.1 -> 0.7-1.2 deg, heading 4.6 -> 1.8-2.8 deg)
+and removed the load-factor violations (4 % -> 0 %) — heat rate is the only constraint
+still exceeded (21 % of the cases, p95 1.011). The 0.1 % tolerance is still 0 % (FPA ~1 deg
+against 0.01 deg). At the full VISTA dispersions the gap to SCvx narrowed slightly but
+remains a distribution problem (RL 2 % within 1 km vs 62 %; feasibility comparable).

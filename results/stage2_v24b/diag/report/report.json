@@ -1,25 +1,25 @@
 {
  "run": "stage2_v24b",
  "timesteps_config": 20000000,
- "steps_evaluated": 20000000,
- "n_validations": 80,
+ "steps_evaluated": 30000000,
+ "n_validations": 120,
  "best_by_score": {
-  "step": 18500000,
-  "d_km": 2.137,
-  "dfpa_deg": 2.401,
-  "dpsi_deg": 2.421,
-  "peak_ratio": 1.0219,
-  "alpha_std_deg": 3.868,
-  "score": 6.787
+  "step": 26750000,
+  "d_km": 1.744,
+  "dfpa_deg": 1.048,
+  "dpsi_deg": 0.362,
+  "peak_ratio": 1.025,
+  "alpha_std_deg": 4.315,
+  "score": 4.424
  },
  "last": {
-  "step": 20000000,
-  "d_km": 1.265,
-  "dfpa_deg": 2.36,
-  "dpsi_deg": 6.863,
-  "peak_ratio": 1.025,
-  "alpha_std_deg": 3.925,
-  "score": 8.097
+  "step": 30000000,
+  "d_km": 0.928,
+  "dfpa_deg": 1.27,
+  "dpsi_deg": 0.441,
+  "peak_ratio": 1.0239,
+  "alpha_std_deg": 4.22,
+  "score": 6.752
  },
  "best_feasible_d": null,
  "milestones_feasible_first_step": {
@@ -38,8 +38,8 @@
    "median_peak_ratio": null
   },
   "modulated_over_limit": {
-   "fraction": 0.675,
-   "median_d_km": 1.9,
+   "fraction": 0.783,
+   "median_d_km": 1.7,
    "min_d_km": 0.6,
    "median_peak_ratio": 1.023
   },
@@ -50,7 +50,7 @@
    "median_peak_ratio": null
   },
   "locked_over_limit": {
-   "fraction": 0.325,
+   "fraction": 0.217,
    "median_d_km": 73.9,
    "min_d_km": 0.2,
    "median_peak_ratio": 1.026
@@ -58,26 +58,26 @@
  },
  "regime_switches": 7,
  "spearman": {
-  "d_vs_peak_ratio": 0.098,
-  "d_vs_alpha_std": -0.739
+  "d_vs_peak_ratio": 0.023,
+  "d_vs_alpha_std": -0.612
  },
  "trend_last_window": {
   "window_steps": 2000000,
-  "log10_d_slope_per_M": -0.1102,
-  "steps_since_best": 1500000,
-  "return_slope_per_M": -98.81
+  "log10_d_slope_per_M": -0.0411,
+  "steps_since_best": 3250000,
+  "return_slope_per_M": -8.03
  },
  "return": {
   "first": -191.0,
   "max": 4280.0,
-  "last_window_median": 3940.0
+  "last_window_median": 4190.0
  },
  "ppo_health": {
   "approx_kl": {
-   "median": 0.0044306708,
-   "p95": 0.009969367400000005,
+   "median": 0.0041629182,
+   "p95": 0.008847609749999999,
    "max": 0.06902428,
-   "min": 1.0966569e-05
+   "min": 3.1716372e-06
   },
   "explained_variance": {
    "median": 0.999,
@@ -86,14 +86,14 @@
    "min": -4.2e-05
   },
   "value_loss": {
-   "median": 316.0,
-   "p95": 6866.0000000000055,
+   "median": 565.5,
+   "p95": 2695.0,
    "max": 59200.0,
    "min": 57.7
   },
   "clip_fraction": {
-   "median": 0.0428,
-   "p95": 0.0936,
+   "median": 0.0359,
+   "p95": 0.0874,
    "max": 0.312,
    "min": 0.0
   },

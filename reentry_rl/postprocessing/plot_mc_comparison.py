@@ -28,9 +28,9 @@ INK, INK2, GRID, SURFACE = "#0b0b0b", "#52514e", "#e4e3df", "#fcfcfb"
 POLICIES = [("v21 best (nominal training, 29.2M)", RES / "stage2_v21/eval_mc_best_29p2M"),
             ("v22 best (dispersion training)", RES / "stage2_v22/eval_mc_best"),
             ("v23 20M final (+ Lagrangian, early angles)", RES / "stage2_v23/eval_mc_final_20M"),
-            ("v24b 6M best (energy, absolute targets; scratch)", RES / "stage2_v24b/eval_mc_best_6M"),
-            ("v24b best (18.5M)", RES / "stage2_v24b/eval_mc_best_18p5M"),
-            ("v24b 20M final", RES / "stage2_v24b/eval_mc_final_20M")]
+            ("v24b 20M final (energy, absolute targets; from scratch)", RES / "stage2_v24b/eval_mc_final_20M"),
+            ("v24b 30M best (26.75M; LR restart at 20M)", RES / "stage2_v24b/eval_mc_best_26p75M"),
+            ("v24b 30M final", RES / "stage2_v24b/eval_mc_final_30M")]
 
 
 def _cdf(ax, d, color, label, ls="-"):
