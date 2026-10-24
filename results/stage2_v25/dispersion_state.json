@@ -1,8 +1,8 @@
 {
- "level": 3,
- "level_start": 4947968,
- "scale": 0.7,
- "step": 5016384,
+ "level": 4,
+ "level_start": 8948544,
+ "scale": 1.0,
+ "step": 9016384,
  "levels": [
   0.2,
   0.35,

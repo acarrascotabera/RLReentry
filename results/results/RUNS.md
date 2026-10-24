@@ -1148,3 +1148,25 @@ ramp 100 / rollout.
 `--resume results/stage2_v25 --timesteps 25000000 --lag-max 4000 --lag-max-per n=10000
 --lag-rate 100`, all other flags unchanged (LR schedule continues: 8.3e-5 at 5M; dispersion
 boundary 0.7 restored). Log: train_log_resume1.txt.
+
+**v25 5M -> 9M (lam_n cap 10,000).** The load-factor violation at the nominal handover is
+gone (8.0M checkpoint: nominal n 0.66x, |dfpa| 0.07 deg; 0.1x sweep n <= 0.71x), lam_n
+4,000 -> 8,423. 1x-scale validation median 10.6 -> 4.7 km (8.0M). But the near-nominal cases
+now break the heat rate by 1-2 % (8.0M: nominal peak 0.9966x — 0.3 % margin, against the
+0.982x attainable at the best attitude; 21 % of the 0.1x sweep above the limit, max 1.021x;
+validation feasibility at 0.1x 12-50 %). The boundary gate at 0.7x was not met (boundary
+median 6.5-7.1 km, p90 30-126 km) and the curriculum forced 0.7 -> 1.0 at 8.95M.
+
+**Heat-rate floor (`--qdot-floor`, commit cbf224f).** Per scenario, Qdot_lb = peak of the
+open-loop lift-up flight (bank 0, AoA at its bound) from the initial state under the
+episode's model factors (RK4 1 s; identical to 1/3 s; ~0.6 s per reset): the least peak any
+guidance can reach. Only the excess above max(1, Qdot_lb) is charged and fed to the PID.
+Nominal floor 0.982. On the CRN robustness sets (first 100 cases each) the floor exceeds the
+limit — heat-rate infeasible for any guidance — in 14 % of the cases at 0.1x (p90 floor
+1.005), 47 % at 0.5x (p90 1.096) and 57 % at 1x (p90 1.213, max 1.58). So most of the
+heat-rate violations of v24b / v25 at the realistic level are physics, not guidance.
+
+### v25 resumed (2) — running (2026-10-24 23:48): from 9.0M to 30M at the 1x boundary, heat-rate floor
+
+`--resume results/stage2_v25 --timesteps 21000000 --qdot-floor`, all other flags as resume (1)
+(lam_n cap 10,000, ramp 100). LR 7.0e-5 at 9M. Log: train_log_resume2.txt.
