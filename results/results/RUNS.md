@@ -1089,3 +1089,43 @@ and removed the load-factor violations (4 % -> 0 %) — heat rate is the only co
 still exceeded (21 % of the cases, p95 1.011). The 0.1 % tolerance is still 0 % (FPA ~1 deg
 against 0.01 deg). At the full VISTA dispersions the gap to SCvx narrowed slightly but
 remains a distribution problem (RL 2 % within 1 km vs 62 %; feasibility comparable).
+
+## Robustness phase (2026-10-24): training under expanding dispersions
+
+Goal (publication focus, aerospace venues): a guidance law that stays STABLE and drives the
+vehicle to the handover under large uncertainty, degrading gracefully where the mission is
+physically infeasible — not only feasibility and terminal precision at the realistic level.
+Note on scale: the VISTA 1x dispersions are stress-test magnitudes (density sigma 25 %, CL/CD
+20 %, mass 5 %, entry altitude 5 km, speed 60 m/s); 0.1x is the realistic level.
+
+New tooling (this commit):
+- **Dispersion curriculum, ADR-style** (training/dispersion_curriculum.py; OpenAI et al. 2019):
+  the sampler draws the scale per episode (50 % at the boundary s_k, else uniform in
+  [0, s_k]); the boundary advances 0.2 -> 0.35 -> 0.5 -> 0.7 -> 1.0 when, over the last 300
+  boundary training episodes, >= 97 % reach the handover and the median landing error is
+  <= 5 km (after >= 1.5M decisions at the level; forced after 4M). Groups ic + tc + models
+  (terminal-condition dispersions now included, as in the SCvx gc_ic_tc campaign).
+- **Robust selection score**: mean over cases of log10(1 + e), e = ||(d/1 km, dgamma/1 deg,
+  dpsi/5 deg)|| + 100 x peak excess (+1e4 if not reached) — graded constraint excess instead of
+  the 1.02 cliff, on S2_val_robust (24 cases: nominal + 8 @0.1x, 8 @0.5x, 7 @1x).
+- **Parallel validation** (pool of 8 from a saved copy of the policy; training workers idle).
+- **Evaluation sets for robustness-vs-uncertainty curves**: S4_scale_x{0.1, 0.25, 0.5, 0.75,
+  1, 1.25}, 300 cases each, ic+tc+models, common random numbers (case i at scale s = case i at
+  1x shrunk by s; verified to 1e-16).
+- `--lag-restore-from` (start the multipliers from another run).
+Legacy paths unchanged (HPO-best regression return -660.1399573458849).
+
+Pre-training reference (v24b 30M final on S2_val_robust, after 8k smoke-test decisions):
+median d 1.2 km nominal, 1.8 km @0.1x, 5.5 km @0.5x, 21.8 km @1x; feasible 100 / 88 / 38 / 29 %.
+
+### v25 — running (launched 2026-10-24): warm start from v24b 30M, dispersion curriculum, 30M decisions
+
+`--init-model results/stage2_v24b/model.zip --init-vn results/stage2_v24b/vecnormalize.pkl
+--lr 1e-4 --lr-decay` (PPO settings of v24b: n_steps 2048 x 8, batch 512, 5 epochs, gamma
+0.9995, clip 0.2, ent 0, target_kl 0.05); same env (obs v25, target actions, energy steps,
+incremental peak charge); reward fixed at v24b's final curriculum level (w_ang_mult 1,
+fpa/psi ramps 2.5 / 2 deg, angle bonuses 250) — no terminal curriculum, so the only thing
+that changes during the run is the uncertainty; PID-Lagrangian from v24b's multipliers
+(lam_Qdot 1985, lam_n 3012), cap 4000, ramp 50 / rollout; `--train-dispersion ic,tc,models
+--disp-levels 0.2,0.35,0.5,0.7,1.0`; selection on S2_val_robust (robust score), validation
+every 250k in a pool of 8.

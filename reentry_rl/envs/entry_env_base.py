@@ -138,6 +138,7 @@ class EntryEnvBase(gym.Env):
             raise ValueError(f"peak_charge must be one of {PEAK_CHARGES}")
         self.peak_charge = peak_charge
         self.scenario_sampler = scenario_sampler
+        self._disp_scale = None
         self.J_ref = float(j_ref) if j_ref is not None else C.J_REF_BANK_ONLY
 
         lim = 3.0 if self.action_mode == "target" else 1.0
@@ -178,6 +179,13 @@ class EntryEnvBase(gym.Env):
             if not hasattr(self.w, k):
                 raise AttributeError(f"RewardWeights has no field {k!r}")
         self._pending_w.update(params)
+        return True
+
+    def set_dispersion_scale(self, sigma_scale):
+        """Move the training sampler's dispersion scale (dispersion curriculum); applies
+        from the next reset."""
+        if self.scenario_sampler is not None and hasattr(self.scenario_sampler, "set_scale"):
+            self.scenario_sampler.set_scale(sigma_scale)
         return True
 
     def _n_state(self):
@@ -406,8 +414,10 @@ class EntryEnvBase(gym.Env):
             setattr(self.w, k, v)
         self._pending_w = {}
         sc = (options or {}).get("scenario")
+        self._disp_scale = None
         if sc is None and self.scenario_sampler is not None:
             sc = self.scenario_sampler(self._rng)
+            self._disp_scale = getattr(self.scenario_sampler, "last_scale", None)
         if isinstance(sc, dict):
             sc = Scenario.from_dict(sc)
         self.scenario = sc if sc is not None else NOMINAL
@@ -572,6 +582,7 @@ class EntryEnvBase(gym.Env):
             chatter_mean = self._chatter / max(self.steps, 1)
             r -= w.w_smooth * chatter_mean
             tinfo["chatter_mean"] = chatter_mean
+            tinfo["disp_scale"] = self._disp_scale
             pk = self._peaks
             if self.peak_charge == "terminal":
                 # worst path-constraint excess of the episode, charged once on every ending

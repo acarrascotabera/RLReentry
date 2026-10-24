@@ -14,6 +14,13 @@ Monte Carlo cases (see envs/scenario.py); "x0.1" sets scale sigma and clip by
     S3_test_ic_models_x0.1   500   ic+models (realistic)                     -> reporting
     S3_test_ic_tc_models     500   ic+tc+models (VISTA, dispersed target)    -> reporting
 
+Robustness study (python -m reentry_rl.validation.eval_sets --robust; written only if absent):
+    S2_val_robust            24    nominal + 8 @0.1x, 8 @0.5x, 7 @1x, ic+tc+models -> selection only
+    S4_scale_x<s>            300   ic+tc+models at s in {0.1, 0.25, 0.5, 0.75, 1.0, 1.25}, all
+                                   from the SAME standard-normal draws (common random numbers:
+                                   case i at scale s is case i at scale 1 shrunk by s), so the
+                                   performance-vs-uncertainty curves compare like with like
+
     python -m reentry_rl.validation.eval_sets
 """
 from pathlib import Path
@@ -53,6 +60,35 @@ def build_all(outdir=OUT):
     return made
 
 
+ROBUST_SCALES = (0.1, 0.25, 0.5, 0.75, 1.0, 1.25)
+ROBUST_GROUPS = ("ic", "tc", "models")
+
+
+def build_robust(outdir=OUT):
+    """Sets for the robustness study; existing files are never overwritten."""
+    made = []
+    p = outdir / "S2_val_robust.json"
+    if not p.exists():
+        scen, labels = [NOMINAL], [{"disp_scale": 0.0}]
+        for scale, n, seed in ((0.1, 8, 103), (0.5, 8, 104), (1.0, 7, 105)):
+            scen += sample_scenarios(n, ROBUST_GROUPS, scale, seed)
+            labels += [{"disp_scale": scale}] * n
+        made.append(save_set(p, "S2_val_robust", scen, labels=labels,
+                             meta={"purpose": "model selection only (mixed scales)",
+                                   "groups": list(ROBUST_GROUPS), "first_is_nominal": True}))
+    for scale in ROBUST_SCALES:
+        name = f"S4_scale_x{scale:g}"
+        p = outdir / f"{name}.json"
+        if not p.exists():
+            made.append(save_set(p, name, sample_scenarios(300, ROBUST_GROUPS, scale, 2030),
+                                 labels=[{"disp_scale": scale}] * 300,
+                                 meta={"purpose": "reporting only (robustness vs scale, CRN)",
+                                       "groups": list(ROBUST_GROUPS), "sigma_scale": scale,
+                                       "seed": 2030}))
+    return made
+
+
 if __name__ == "__main__":
-    for p in build_all():
+    import sys
+    for p in (build_robust() if "--robust" in sys.argv[1:] else build_all()):
         print(p)

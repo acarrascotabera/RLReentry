@@ -125,22 +125,42 @@ def sweep_scenarios(groups=("ic", "tc", "models"), multipliers=(-3, -2, -1, 1, 2
 class ScenarioSampler:
     """Callable rng -> Scenario for training-time domain randomization (picklable,
     so it can be handed to SubprocVecEnv workers through env_kwargs). Each env draws
-    a new scenario at every reset from its own seeded rng."""
+    a new scenario at every reset from its own seeded rng.
 
-    def __init__(self, groups=("ic", "models"), sigma_scale=1.0):
+    mode "fixed": every draw at sigma_scale. mode "adr": the scale is itself drawn per
+    episode, with probability p_edge at the boundary sigma_scale and otherwise uniform
+    in [0, sigma_scale] (ADR-style boundary sampling; the boundary is moved by
+    training/dispersion_curriculum.py). The scale of the last draw is `last_scale`."""
+
+    def __init__(self, groups=("ic", "models"), sigma_scale=1.0, mode="fixed", p_edge=0.5):
+        if mode not in ("fixed", "adr"):
+            raise ValueError("mode must be 'fixed' or 'adr'")
         self.groups = tuple(groups)
         self.sigma_scale = float(sigma_scale)
         self.names = _params(self.groups)
+        self.mode = mode
+        self.p_edge = float(p_edge)
+        self.last_scale = self.sigma_scale
 
     def __call__(self, rng):
+        s = self.sigma_scale
+        if self.mode == "adr" and rng.random() >= self.p_edge:
+            s = float(rng.uniform(0.0, self.sigma_scale))
+        self.last_scale = s
         vals = {}
         for k in self.names:
-            mean, sigma, lo, hi = _scaled(k, self.sigma_scale)
+            mean, sigma, lo, hi = _scaled(k, s)
             vals[k] = float(np.clip(rng.normal(mean, sigma), lo, hi))
         return replace(NOMINAL, **vals)
 
+    def set_scale(self, sigma_scale):
+        self.sigma_scale = float(sigma_scale)
+
     def describe(self):
-        return {"groups": list(self.groups), "sigma_scale": self.sigma_scale}
+        d = {"groups": list(self.groups), "sigma_scale": self.sigma_scale}
+        if self.mode != "fixed":
+            d.update(mode=self.mode, p_edge=self.p_edge)
+        return d
 
 
 def sampler(groups=("ic", "models"), sigma_scale=1.0):

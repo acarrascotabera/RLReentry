@@ -75,9 +75,12 @@ class PIDLagrangianCallback(BaseCallback):
                                                "lam_max": self.lam_max, "rate_max": self.rate_max},
                                               indent=1))
 
-    def restore(self):
-        if self.state_path.exists():
-            st = json.loads(self.state_path.read_text())
+    def restore(self, path=None):
+        """Load multipliers and integrals from this run's state (resume) or from another
+        run's lagrange_state.json (warm start: path)."""
+        src = Path(path) if path is not None else self.state_path
+        if src.exists():
+            st = json.loads(src.read_text())
             self.lam, self.I, self.e_prev = st["lam"], st["I"], st["e_prev"]
             self.I = {k: min(v, self._i_max()) for k, v in self.I.items()}   # anti-windup
         return self.lam

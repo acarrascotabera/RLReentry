@@ -65,8 +65,11 @@ def parse_args():
     ap.add_argument("--eval-freq", type=int, default=50_000, help="total env steps between evals")
     ap.add_argument("--val-set", default="S0_nominal",
                     help="validation set for model selection (results/eval_sets/<name>.json or path)")
-    ap.add_argument("--score-mode", default="position", choices=["position", "full"],
-                    help="selection score: landing error only, or ||(d/1km, dfpa/1deg, dpsi/5deg)||")
+    ap.add_argument("--score-mode", default="position", choices=["position", "full", "robust"],
+                    help="selection score: landing error only, ||(d/1km, dfpa/1deg, dpsi/5deg)|| "
+                         "gated on feasibility, or robust (graded constraint excess, mean log cost)")
+    ap.add_argument("--val-workers", type=int, default=0,
+                    help="roll the validation set out in a pool of this many processes")
     ap.add_argument("--save-below", type=float, default=None,
                     help="also snapshot every model whose validation score is below this")
     ap.add_argument("--obs-version", default=None, help="observation layout (default: env default)")
@@ -99,6 +102,18 @@ def parse_args():
     ap.add_argument("--lag-max", type=float, default=2000.0, help="multiplier cap (bounds the return scale)")
     ap.add_argument("--lag-start", type=int, default=0,
                     help="hold the multipliers at --lag-init until this many steps (cold-start warm-up)")
+    ap.add_argument("--lag-restore-from", default=None,
+                    help="start the multipliers from another run's lagrange_state.json (warm start)")
+    ap.add_argument("--disp-levels", default=None,
+                    help="dispersion curriculum: boundary scales, e.g. 0.2,0.35,0.5,0.7,1.0 "
+                         "(ADR-style sampling; needs --train-dispersion)")
+    ap.add_argument("--disp-p-edge", type=float, default=0.5,
+                    help="fraction of episodes drawn at the boundary scale (rest uniform in [0, s])")
+    ap.add_argument("--disp-min-steps", type=int, default=1_500_000)
+    ap.add_argument("--disp-max-steps", type=int, default=4_000_000)
+    ap.add_argument("--disp-window", type=int, default=300, help="boundary episodes in the gate")
+    ap.add_argument("--disp-reach", type=float, default=0.97, help="gate: handover reach rate")
+    ap.add_argument("--disp-d-med-km", type=float, default=5.0, help="gate: median landing error")
     ap.add_argument("--lag-rate", type=float, default=None,
                     help="max increase of each multiplier per rollout (ramp instead of a step)")
     ap.add_argument("--peak-charge", default=None, choices=["terminal", "incremental"],
@@ -265,6 +280,8 @@ def main():
                                          start_step=args.lag_start, rate_max=args.lag_rate)
         if args.resume:
             lagrange.restore()
+        elif args.lag_restore_from:
+            lagrange.restore(args.lag_restore_from)
         weights.w_peak = 0.0                  # the multipliers replace the fixed peak charge
         lagrange.apply_to(weights)
         print(f"[lagrange] PID multipliers {lagrange.params()} budget {args.lag_budget}")
@@ -272,10 +289,25 @@ def main():
     # Vectorized training env + a single-env eval env (EvalCallback syncs VecNormalize stats).
     train_env_kwargs = dict(env_kwargs)
     sampler = None
+    disp_cb = None
+    if args.disp_levels:
+        if not args.train_dispersion:
+            raise SystemExit("--disp-levels needs --train-dispersion (the dispersion groups)")
+        from reentry_rl.training.dispersion_curriculum import DispersionCurriculumCallback
+        disp_cb = DispersionCurriculumCallback(
+            [float(v) for v in args.disp_levels.split(",")], outdir, min_steps=args.disp_min_steps,
+            max_steps=args.disp_max_steps, window=args.disp_window, reach_min=args.disp_reach,
+            d_med_km=args.disp_d_med_km)
+        if args.resume:
+            disp_cb.restore()
+        print(f"[dispersion] curriculum {disp_cb.levels}, boundary scale {disp_cb.scale():g}")
     if args.train_dispersion:
         from reentry_rl.envs.scenario import ScenarioSampler
-        sampler = ScenarioSampler(tuple(g.strip() for g in args.train_dispersion.split(",")),
-                                  args.train_sigma_scale)
+        groups = tuple(g.strip() for g in args.train_dispersion.split(","))
+        if disp_cb is not None:
+            sampler = ScenarioSampler(groups, disp_cb.scale(), mode="adr", p_edge=args.disp_p_edge)
+        else:
+            sampler = ScenarioSampler(groups, args.train_sigma_scale)
         train_env_kwargs["scenario_sampler"] = sampler
         print(f"[dispersion] training on {sampler.describe()}")
     venv = build_vecenv(env_cls, args.n_envs, weights, args.n_substeps, args.seed, subproc,
@@ -293,8 +325,10 @@ def main():
     # eval_freq / ckpt_freq are given in TOTAL env steps -> convert to per-env-call counts.
     eval_freq = max(args.eval_freq // args.n_envs, 1)
     ckpt_freq = max(args.ckpt_freq // args.n_envs, 1)
-    val_name, val_scen = load_validation_set(args.val_set)
+    val_name, val_scen, val_labels = load_validation_set(args.val_set, with_labels=True)
     val_cb = ValidationCallback(args.stage, val_scen, eval_freq, outdir, weights, env_kwargs,
+                                labels=val_labels if any(val_labels) else None,
+                                workers=args.val_workers,
                                 score_mode=args.score_mode, save_below=args.save_below,
                                 set_name=val_name, verbose=1)
     if curriculum is not None:
@@ -377,6 +411,8 @@ def main():
             "action_std": args.action_std,
             "env_kwargs": env_kwargs, "val_set": val_name, "score_mode": args.score_mode,
             "train_dispersion": (None if sampler is None else sampler.describe()),
+            "dispersion_curriculum": (None if disp_cb is None else disp_cb.describe()),
+            "lag_restore_from": args.lag_restore_from,
             "lagrangian": (None if lagrange is None else
                            {"budget": args.lag_budget, "kp": args.lag_kp, "ki": args.lag_ki,
                             "kd": args.lag_kd, "lam_init": args.lag_init, "lam_max": args.lag_max,
@@ -393,7 +429,8 @@ def main():
           f"subproc={subproc} substeps={args.n_substeps} -> {outdir}")
     t0 = time.time()
     model.learn(total_timesteps=args.timesteps, reset_num_timesteps=not bool(args.resume),
-                callback=[val_cb, ckpt_cb] + ([lagrange] if lagrange is not None else []),
+                callback=[val_cb, ckpt_cb] + ([lagrange] if lagrange is not None else [])
+                         + ([disp_cb] if disp_cb is not None else []),
                 progress_bar=False)
     train_s = time.time() - t0
 

@@ -103,7 +103,8 @@ class ValidationCallback(BaseCallback):
     appended to eval/validation_history.csv."""
 
     def __init__(self, stage, scenarios, eval_freq, outdir, weights, env_kwargs=None,
-                 score_mode="position", save_below=None, set_name="validation", verbose=0):
+                 score_mode="position", save_below=None, set_name="validation", verbose=0,
+                 labels=None, workers=0):
         super().__init__(verbose)
         self.stage = stage
         self.scenarios = list(scenarios)
@@ -114,6 +115,10 @@ class ValidationCallback(BaseCallback):
         self.score_mode = score_mode
         self.save_below = save_below
         self.set_name = set_name
+        self.labels = labels
+        # workers > 1: roll the validation set out in a process pool from a saved copy of the
+        # policy (the training workers are idle during the callback); falls back in-process
+        self.workers = int(workers or 0)
         self.best = float("inf")
         self._runner = None
         self.listeners = []          # fn(callback, df, rec) after each evaluation (curriculum)
@@ -121,7 +126,20 @@ class ValidationCallback(BaseCallback):
         self.history_path.parent.mkdir(parents=True, exist_ok=True)
 
     def evaluate(self):
-        from ..validation.evaluate_policy import PolicyRunner, selection_score
+        from ..validation.evaluate_policy import PolicyRunner, selection_score, evaluate_scenarios
+        if self.workers > 1:
+            try:
+                tmp = self.outdir / "eval"
+                self.model.save(str(tmp / "_val_model.zip"))
+                self.training_env.save(str(tmp / "_val_vecnormalize.pkl"))
+                df = evaluate_scenarios(tmp / "_val_model.zip", tmp / "_val_vecnormalize.pkl",
+                                        self.scenarios, self.stage, labels=self.labels,
+                                        workers=self.workers, weights=self.weights,
+                                        env_kwargs=self.env_kwargs)
+                return df, selection_score(df, self.score_mode)
+            except Exception as exc:                  # never let validation kill training
+                print(f"[val] parallel validation failed ({exc!r}); falling back in-process")
+                self.workers = 0
         if self._runner is None:
             self._runner = PolicyRunner(self.model, self.training_env.obs_rms, self.stage,
                                         self.weights, self.env_kwargs)
@@ -129,7 +147,7 @@ class ValidationCallback(BaseCallback):
         rms = self.training_env.obs_rms               # stats keep moving during training
         r.mean = np.asarray(rms.mean, dtype=np.float64)
         r.std = np.sqrt(np.asarray(rms.var, dtype=np.float64) + 1e-8)
-        df = r.run_many(self.scenarios)
+        df = r.run_many(self.scenarios, self.labels)
         return df, selection_score(df, self.score_mode)
 
     def _on_step(self):
@@ -152,6 +170,11 @@ class ValidationCallback(BaseCallback):
                "nominal_d_km": float(df["d_km"].iloc[0]),
                "nominal_dfpa_deg": float(df["dfpa_deg"].iloc[0]),
                "nominal_dpsi_deg": float(df["dpsi_deg"].iloc[0])}
+        if "disp_scale" in df.columns:                # mixed-scale validation set
+            for s, g in df.groupby("disp_scale"):
+                rec[f"d_km_median_s{s:g}"] = float(g["d_km"].median())
+                rec[f"feasible_rate_s{s:g}"] = float(g["feasible"].mean())
+                rec[f"peak_excess_mean_s{s:g}"] = float(np.maximum(g["max_ratio"] - 1.0, 0.0).mean())
         for k, v in rec.items():
             if k != "step":
                 self.logger.record(f"val/{k}", v)
@@ -179,12 +202,13 @@ class ValidationCallback(BaseCallback):
         return True
 
 
-def load_validation_set(name_or_path):
-    """-> (set name, [Scenario]) from results/eval_sets/ (or a path)."""
+def load_validation_set(name_or_path, with_labels=False):
+    """-> (set name, [Scenario]) from results/eval_sets/ (or a path); with_labels also
+    returns the per-case label dicts (e.g. disp_scale of a mixed-scale set)."""
     from ..envs.scenario import load_set
     from ..validation.evaluate_policy import resolve_set
-    name, scen, _labels = load_set(resolve_set(name_or_path))
-    return name, scen
+    name, scen, labels = load_set(resolve_set(name_or_path))
+    return (name, scen, labels) if with_labels else (name, scen)
 
 
 def set_action_std(model, std):

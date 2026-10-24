@@ -259,6 +259,29 @@ def case_error(row, mode="position"):
 
 
 def selection_score(df, mode="position", q=0.9):
+    if mode == "robust":
+        return robust_score(df)
+    return _gated_score(df, mode, q)
+
+
+def robust_score(df):
+    """Selection score for training under large dispersions (lower is better).
+
+    Per case: the full terminal error ||(d/1 km, dgamma/1 deg, dpsi/5 deg)|| plus 100 per
+    unit of peak path-constraint excess (graded, no feasibility cliff: at the VISTA scale
+    part of the tail is infeasible for any guidance), +10000 if the handover is not
+    reached. Aggregate: mean of log10(1 + e) over the cases (scale-free; sensitive to the
+    whole distribution, including the tail, without letting one unreachable case dominate)."""
+    v = []
+    for _, row in df.iterrows():
+        e = case_error(row, "full") + 100.0 * max(0.0, float(row["max_ratio"]) - 1.0)
+        if row["outcome"] != "reached":
+            e += 1e4
+        v.append(np.log10(1.0 + e))
+    return float(np.mean(v))
+
+
+def _gated_score(df, mode="position", q=0.9):
     """Feasibility-gated terminal error used for model selection (lower is better).
 
     Per case: the terminal error (position: d_km; full: ||(d/1 km, dgamma/1 deg,
