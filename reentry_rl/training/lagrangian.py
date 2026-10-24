@@ -22,7 +22,11 @@ pinned for ~1,800 rollouts after the constraint was met). lam_max bounds the ret
 the INCREASE of each multiplier per rollout (v24: at the end of the warm-up the cold-start
 policy violated the heat rate by 73 %, Kp*e alone took lam_Qdot from 200 to ~1,700 in one
 rollout and to the 4,000 cap in three — a -2,900 step in the return), with conditional
-integration (I is frozen while the limiter is active, so the ramp does not wind up). New
+integration (I is frozen while the limiter is active, so the ramp does not wind up).
+lam_max may be a dict per constraint (v25: under 0.5x VISTA dispersions the heat-rate
+excess is partly unavoidable for any guidance, so lam_Qdot sat at the 4,000 cap, while the
+load-factor excess is a choice of the terminal pull-up — at the shared cap it was cheaper
+than the terminal-angle rewards and the nominal flight pulled 1.10x the limit). New
 multipliers are pushed with env_method("set_reward_params") and take effect at
 each env's next reset. History: <run>/eval/lagrange.csv; state for --resume:
 <run>/lagrange_state.json.
@@ -46,7 +50,9 @@ class PIDLagrangianCallback(BaseCallback):
         self.budget = float(budget)
         self.kp, self.ki, self.kd = float(kp), float(ki), float(kd)
         self.lam0 = float(lam_init)
-        self.lam_max = float(lam_max)
+        caps = lam_max if isinstance(lam_max, dict) else {}
+        default = float(lam_max) if not isinstance(lam_max, dict) else float(caps.get("default", 2000.0))
+        self.lam_max = {k: float(caps.get(k, default)) for k in CONSTRAINTS}
         self.min_episodes = int(min_episodes)
         # warm-up: multipliers held at lam_init until this many steps (a cold-start policy
         # violates every constraint by ~2x; at the cap the penalties would swamp the return)
@@ -61,8 +67,8 @@ class PIDLagrangianCallback(BaseCallback):
         self.history_path = self.outdir / "eval" / "lagrange.csv"
         self.state_path = self.outdir / "lagrange_state.json"
 
-    def _i_max(self):
-        return (self.lam_max - self.lam0) / self.ki if self.ki > 0 else float("inf")
+    def _i_max(self, k):
+        return (self.lam_max[k] - self.lam0) / self.ki if self.ki > 0 else float("inf")
 
     # -- state -----------------------------------------------------------------
     def params(self):
@@ -82,7 +88,7 @@ class PIDLagrangianCallback(BaseCallback):
         if src.exists():
             st = json.loads(src.read_text())
             self.lam, self.I, self.e_prev = st["lam"], st["I"], st["e_prev"]
-            self.I = {k: min(v, self._i_max()) for k, v in self.I.items()}   # anti-windup
+            self.I = {k: min(v, self._i_max(k)) for k, v in self.I.items()}   # anti-windup
         return self.lam
 
     def apply_to(self, weights):
@@ -109,10 +115,10 @@ class PIDLagrangianCallback(BaseCallback):
             J = float(x.mean())
             e = J - self.budget
             if not warm:
-                I_new = min(max(0.0, self.I[k] + e), self._i_max())
+                I_new = min(max(0.0, self.I[k] + e), self._i_max(k))
                 d = max(0.0, e - self.e_prev[k])
                 lam = float(np.clip(self.lam0 + self.kp * e + self.ki * I_new + self.kd * d,
-                                    0.0, self.lam_max))
+                                    0.0, self.lam_max[k]))
                 if self.rate_max is not None and lam > self.lam[k] + self.rate_max:
                     lam = self.lam[k] + self.rate_max
                     I_new = min(I_new, self.I[k])      # conditional integration (no ramp windup)

@@ -1129,3 +1129,22 @@ that changes during the run is the uncertainty; PID-Lagrangian from v24b's multi
 (lam_Qdot 1985, lam_n 3012), cap 4000, ramp 50 / rollout; `--train-dispersion ic,tc,models
 --disp-levels 0.2,0.35,0.5,0.7,1.0`; selection on S2_val_robust (robust score), validation
 every 250k in a pool of 8.
+
+**v25 to 5.0M.** Dispersion boundary 0.2 -> 0.35 (1.51M, boundary median 2.55 km) -> 0.5
+(3.01M, 3.79 km) -> 0.7 (4.95M, 4.84 km); every boundary episode reached the handover.
+Robust validation score 1.10 -> 0.958 (best, 4.0M); 1x-scale validation median 27-42 km
+(0-1.5M) -> 7-15 km (2.75-5M). But from 3.75M the NOMINAL case violated a path constraint:
+the 4.5M checkpoint pulls 1.099x the load-factor limit at the nominal handover (3M: 0.77x)
+while reaching |dfpa| 0.17 deg — a sharper terminal pull-up bought with load factor; heat
+rate stayed at 0.987x. Both lam_Qdot and lam_n sat at the shared 4,000 cap (mean excess
+3.0 % / 3.7 % vs the 0.5 % budget): the heat-rate excess is partly unavoidable at 0.5x
+(1.6 % nominal margin at the best attitude), the load-factor excess is not (it is the
+pull-up), and at the shared cap 10 % load excess cost ~400 against the terminal-angle
+rewards. Fix: per-constraint caps (`--lag-max-per n=10000`; Qdot and qbar stay at 4,000),
+ramp 100 / rollout.
+
+### v25 resumed — running (2026-10-24 18:38): from 5.0M to 30M, lam_n cap 10,000
+
+`--resume results/stage2_v25 --timesteps 25000000 --lag-max 4000 --lag-max-per n=10000
+--lag-rate 100`, all other flags unchanged (LR schedule continues: 8.3e-5 at 5M; dispersion
+boundary 0.7 restored). Log: train_log_resume1.txt.

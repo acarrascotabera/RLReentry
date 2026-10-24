@@ -102,6 +102,8 @@ def parse_args():
     ap.add_argument("--lag-max", type=float, default=2000.0, help="multiplier cap (bounds the return scale)")
     ap.add_argument("--lag-start", type=int, default=0,
                     help="hold the multipliers at --lag-init until this many steps (cold-start warm-up)")
+    ap.add_argument("--lag-max-per", default=None,
+                    help="per-constraint multiplier caps overriding --lag-max, e.g. n=10000,Qdot=4000")
     ap.add_argument("--lag-restore-from", default=None,
                     help="start the multipliers from another run's lagrange_state.json (warm start)")
     ap.add_argument("--disp-levels", default=None,
@@ -275,8 +277,12 @@ def main():
 
     lagrange = None
     if args.lagrangian:
+        lag_max = args.lag_max
+        if args.lag_max_per:
+            lag_max = {"default": args.lag_max,
+                       **{k.strip(): float(v) for k, v in (kv.split("=") for kv in args.lag_max_per.split(","))}}
         lagrange = PIDLagrangianCallback(outdir, budget=args.lag_budget, kp=args.lag_kp, ki=args.lag_ki,
-                                         kd=args.lag_kd, lam_init=args.lag_init, lam_max=args.lag_max,
+                                         kd=args.lag_kd, lam_init=args.lag_init, lam_max=lag_max,
                                          start_step=args.lag_start, rate_max=args.lag_rate)
         if args.resume:
             lagrange.restore()
