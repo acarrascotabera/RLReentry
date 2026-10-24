@@ -13,6 +13,15 @@
   "extra_steps": 21000000,
   "lr_restart": false,
   "lr_at_resume": 7e-05,
-  "started": "2026-10-24T23:49:13"
+  "started": "2026-10-24T23:49:13",
+  "aborted": "stopped at 10.5M: training at the 1x VISTA boundary (stress test; 57 % heat-rate infeasible, boundary p90 1118 km) degraded the policy (robust score 1.19-1.29, nominal infeasible on 6/6 validations, return 0.7-1.5k); artifacts in aborted_1x_boundary/"
+ },
+ {
+  "resumed_from": "ppo_9000000_steps.zip",
+  "at_steps": 9000000,
+  "extra_steps": 21000000,
+  "lr_restart": false,
+  "lr_at_resume": 7e-05,
+  "started": "2026-10-25T01:48:56"
  }
 ]

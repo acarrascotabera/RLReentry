@@ -1170,3 +1170,21 @@ heat-rate violations of v24b / v25 at the realistic level are physics, not guida
 
 `--resume results/stage2_v25 --timesteps 21000000 --qdot-floor`, all other flags as resume (1)
 (lam_n cap 10,000, ramp 100). LR 7.0e-5 at 9M. Log: train_log_resume2.txt.
+
+**v25 resumed (2) — aborted at 10.5M (1x boundary).** Training at the full VISTA scale (the
+stress test: 57 % of the cases heat-rate infeasible for any guidance, boundary p90 landing
+error 1,118 km, boundary mean peak excess 17 %) degraded the policy instead of hardening it:
+robust validation score 1.19-1.29 (v24b start ~1.06, best 0.958 at 4.0M), the nominal case
+infeasible on 6/6 validations, 0.1x feasibility 0 %, training return 1.4k -> 0.7-1.5k, value
+loss 0.8-2.5e4, lam_n at the 10,000 cap (load-factor excess 2-15 %). Rolled back to the
+9.0M checkpoint (end of the 0.7x phase); the 9.0-10.5M artifacts and logs are kept in
+aborted_1x_boundary/. Lagrange state set to its 9.0M multipliers (integrals consistent).
+
+**Design envelope.** The training distribution stops at 0.7x VISTA (~7x the realistic
+level), where the 1x-scale validation median was still improving (10.6 -> 4.7 km during the
+0.7x phase); 1x and 1.25x are off-design robustness tests (S4 sets).
+
+### v25 resumed (3) — running (2026-10-25 01:48): from 9.0M to 30M at the 0.7x envelope, heat-rate floor
+
+`--resume results/stage2_v25 --timesteps 21000000 --qdot-floor --disp-levels 0.2,0.35,0.5,0.7`
+(0.7 is the last level), other flags as before. Log: train_log_resume2.txt.
