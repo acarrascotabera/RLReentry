@@ -118,6 +118,9 @@ def parse_args():
     ap.add_argument("--disp-d-med-km", type=float, default=5.0, help="gate: median landing error")
     ap.add_argument("--lag-rate", type=float, default=None,
                     help="max increase of each multiplier per rollout (ramp instead of a step)")
+    ap.add_argument("--qdot-floor", action="store_true",
+                    help="charge the heat-rate excess above the scenario's attainable minimum "
+                         "(open-loop lift-up peak) instead of above the limit")
     ap.add_argument("--peak-charge", default=None, choices=["terminal", "incremental"],
                     help="episode-peak charges paid at the end (legacy) or as the running peak grows")
     ap.add_argument("--init-action-mean", default=None,
@@ -191,6 +194,8 @@ def main():
         env_kwargs["step_mode"] = args.step_mode
     if args.peak_charge:
         env_kwargs["peak_charge"] = args.peak_charge
+    if args.qdot_floor:
+        env_kwargs["qdot_floor"] = True
     if args.energy_steps:
         env_kwargs["energy_steps"] = args.energy_steps
 

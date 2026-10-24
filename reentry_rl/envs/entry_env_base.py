@@ -101,7 +101,7 @@ class EntryEnvBase(gym.Env):
                  obs_version=None, exact_terminal=True, rate_saturation=True,
                  scenario_sampler=None, action_mode="rate", step_mode="time",
                  energy_steps=800, dt_max=10.0, dt_late=1.0, track_gain=2.0,
-                 peak_charge="terminal"):
+                 peak_charge="terminal", qdot_floor=False):
         super().__init__()
         # private copy: DummyVecEnv hands every env the same weights object, and the
         # curriculum changes weights per env (set_reward_params)
@@ -137,6 +137,15 @@ class EntryEnvBase(gym.Env):
         if peak_charge not in PEAK_CHARGES:
             raise ValueError(f"peak_charge must be one of {PEAK_CHARGES}")
         self.peak_charge = peak_charge
+        # qdot_floor: charge the heat-rate excess (Lagrangian/peak terms) only above the
+        # scenario's attainable minimum, max(1, Qdot_lb), Qdot_lb = peak of the open-loop
+        # lift-up flight (bank 0, AoA at its upper bound) from the episode's initial state
+        # under its model factors. Under large dispersions part of the heat-rate excess is
+        # unavoidable for any guidance; without the floor it saturates the multiplier and
+        # the avoidable (near-nominal) excess is no longer priced (v25 at 0.5-0.7x).
+        self.qdot_floor = bool(qdot_floor)
+        self._qdot_lb = 0.0
+        self._qdot_floor_eff = 1.0
         self.scenario_sampler = scenario_sampler
         self._disp_scale = None
         self.J_ref = float(j_ref) if j_ref is not None else C.J_REF_BANK_ONLY
@@ -187,6 +196,33 @@ class EntryEnvBase(gym.Env):
         if self.scenario_sampler is not None and hasattr(self.scenario_sampler, "set_scale"):
             self.scenario_sampler.set_scale(sigma_scale)
         return True
+
+    def _heat_rate_floor(self, z0, h=1.0, t_max=900.0):
+        """Peak Qdot / limit of the open-loop lift-up flight from z0 (bank 0, AoA at its
+        upper bound, tracked at the actuator limits) under the episode's model factors:
+        the least peak any guidance can reach from this state (maximum vertical lift keeps
+        the vehicle highest through the heat pulse). Integrated (RK4, h) until the pulse is
+        over: Qdot below 60 % of its peak and falling, the handover altitude, or t_max."""
+        saved = (self.action_mode, self._sig_t, self._alp_t)
+        try:
+            self.action_mode = "target"
+            self._sig_t = 0.0
+            self._alp_t = C.ALPHA_MAX * _DEG
+            z, t, q_peak, q_prev = np.array(z0, dtype=float), 0.0, 0.0, 0.0
+            while t < t_max:
+                z = self._rk4(z, h, 0.0, 0.0)
+                t += h
+                q = self._path_point(z)[0] / C.QDOT_MAX
+                if q > q_peak:
+                    q_peak = q
+                elif q < 0.6 * q_peak and q < q_prev:
+                    break
+                if altitude_m(z[0], z[2]) <= self.tgt_alt:
+                    break
+                q_prev = q
+        finally:
+            self.action_mode, self._sig_t, self._alp_t = saved
+        return float(q_peak)
 
     def _n_state(self):
         return 7 + (1 if self.optimize_aoa else 0)
@@ -454,6 +490,9 @@ class EntryEnvBase(gym.Env):
         self._step_barrier = 0.0
         self._sig_t = z[6]                            # targets start at the current attitude
         self._alp_t = z[7] if self.optimize_aoa else 0.0
+        if self.qdot_floor:
+            self._qdot_lb = self._heat_rate_floor(z)
+            self._qdot_floor_eff = max(1.0, self._qdot_lb)
         return self._obs(), self._info()
 
     def step(self, action):
@@ -541,6 +580,7 @@ class EntryEnvBase(gym.Env):
         self._peak_ratio = max(pk.values())
         if self.peak_charge == "incremental":
             exc = {k: max(0.0, v - 1.0) for k, v in pk.items()}
+            exc["Qdot"] = max(0.0, pk["Qdot"] - self._qdot_floor_eff)
             ep = self._exc_prev
             r -= (w.lam_Qdot * (exc["Qdot"] - ep["Qdot"]) + w.lam_qbar * (exc["qbar"] - ep["qbar"])
                   + w.lam_n * (exc["n"] - ep["n"]) + w.w_peak * (max(exc.values()) - max(ep.values())))
@@ -583,13 +623,15 @@ class EntryEnvBase(gym.Env):
             r -= w.w_smooth * chatter_mean
             tinfo["chatter_mean"] = chatter_mean
             tinfo["disp_scale"] = self._disp_scale
+            if self.qdot_floor:
+                tinfo["qdot_lb"] = self._qdot_lb
             pk = self._peaks
             if self.peak_charge == "terminal":
                 # worst path-constraint excess of the episode, charged once on every ending
                 r -= w.w_peak * max(0.0, self._peak_ratio - 1.0)
                 # per-constraint Lagrangian terms (multipliers adapted during training)
-                r -= (w.lam_Qdot * max(0.0, pk["Qdot"] - 1.0) + w.lam_qbar * max(0.0, pk["qbar"] - 1.0)
-                      + w.lam_n * max(0.0, pk["n"] - 1.0))
+                r -= (w.lam_Qdot * max(0.0, pk["Qdot"] - self._qdot_floor_eff)
+                      + w.lam_qbar * max(0.0, pk["qbar"] - 1.0) + w.lam_n * max(0.0, pk["n"] - 1.0))
             tinfo["peak_ratio"] = self._peak_ratio
             tinfo["peak_Qdot"], tinfo["peak_qbar"], tinfo["peak_n"] = pk["Qdot"], pk["qbar"], pk["n"]
             terr = self._terminal_errors()

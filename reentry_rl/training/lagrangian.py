@@ -101,7 +101,10 @@ class PIDLagrangianCallback(BaseCallback):
         for done, info in zip(self.locals["dones"], self.locals["infos"]):
             if done and "peak_Qdot" in info:
                 for k in CONSTRAINTS:
-                    self._excess[k].append(max(0.0, float(info[f"peak_{k}"]) - 1.0))
+                    # heat rate relative to the scenario's attainable floor when the env
+                    # reports one (qdot_floor), as in the reward
+                    floor = max(1.0, float(info.get("qdot_lb", 0.0))) if k == "Qdot" else 1.0
+                    self._excess[k].append(max(0.0, float(info[f"peak_{k}"]) - floor))
         return True
 
     def _on_rollout_end(self):
