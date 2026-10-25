@@ -1199,3 +1199,56 @@ Heat rate now gets the same 10,000 cap as the load factor.
 ### v25 resumed (4) — running (2026-10-25 02:48): from 10.5M to 30M, Qdot and n caps 10,000
 
 `--lag-max-per n=10000,Qdot=10000`, other flags as resume (3). Log: train_log_resume3.txt.
+
+**v25 resumed (4) — paused at 12.0M** (heat-rate cap 10,000): no recovery near nominal
+(nominal infeasible on 5/5 validations, 0.1x feasibility 12.5 %, heading error up to 15 deg).
+Training paused for a proper robustness evaluation (the 24-case validation has 7-8 cases
+per scale — too noisy to steer by).
+
+### Robustness evaluation (2026-10-25): S4 common-random-number sets, 300 cases per scale
+
+New tools: validation/heat_rate_floor.py (per-case attainable heat-rate floor, files in
+results/eval_sets/floors/) and postprocessing/robustness_curves.py (results/curves/
+robustness_curves.png, robustness_table.md). Heat-rate infeasible for any guidance: 12 %
+(0.1x), 33 % (0.25x), 45 % (0.5x), 49 % (0.75x), 52 % (1x), 53 % (1.25x); SCvx campaigns
+gc_ic_tc 44 % and gc_models 42 % (so SCvx's 39 % / 34 % feasibility sits against ceilings of
+~56 % / 58 %); S3_test_ic_models_x0.1 13 %.
+
+| scale | metric | v24b 30M | v25 4M | v25 8M | v25 11.5M |
+|---|---|---|---|---|---|
+| all | handover reached | 100 % | 100 % | 100 % | 100 % (all 7,200 cases, up to 1.25x) |
+| 0.1 | median d / p90 d | 1.64 / 2.87 km | 2.41 / 4.64 | 3.58 / 5.79 | 1.30 / 2.79 |
+| 0.1 | strictly feasible (ceiling 88 %) | 77 % | 61 % | 57 % | 11 % |
+| 0.1 | median abs dfpa / dpsi | 1.14 / 2.88 deg | 0.42 / 3.19 | 0.10 / 6.83 | 0.76 / 11.3 |
+| 0.1 | bank-rate RMS, reversals | 2.5 deg/s, 4 | 0.64, 2 | 0.60, 2 | 2.9, 6 |
+| 0.5 | median d / p90 d | 4.94 / 20.2 km | 5.87 / 18.4 | 5.39 / 17.1 | 4.84 / 17.7 |
+| 0.5 | feasible (ceiling 55 %) | 38 % | 34 % | 36 % | 29 % |
+| 0.5 | median abs dfpa / dpsi | 6.74 / 9.49 deg | 2.26 / 5.71 | 1.13 / 5.82 | 2.61 / 10.9 |
+| 1 | median d / p90 d | 17.1 / 148 km | 17.7 / 238 | 14.4 / 557 | 12.3 / 556 |
+| 1 | feasible (ceiling 48 %) | 19 % | 23 % | 26 % | 26 % |
+| 1 | median abs dfpa / dpsi | 9.13 / 20.5 deg | 5.74 / 12.6 | 2.76 / 12.2 | 2.73 / 17.3 |
+| 1.25 | median d / feasible | 32.7 km / 15 % | 29.7 / 17 % | 22.6 / 21 % | 21.0 / 23 % |
+
+Findings: (1) no policy diverges — every case reaches the handover up to 1.25x the stress
+test; errors grow gracefully with the scale. (2) Counting only violations above the
+scenario floor barely changes feasibility: the violations are guidance-attributable — the
+policies end ~1 % (median) above the attainable heat-rate peak, plus load-factor excess from
+the terminal pull-up (0.1x: n > 1 in 0 % (v24b), 5 %, 1 %, 64 % (11.5M)). (3) The robust phase
+cut the large-dispersion angle errors ~3x (FPA 9.1 -> 2.8 deg at 1x) and the bank activity
+~4x (v25 4M / 8M), and the 1x median landing error 17 -> 12-14 km, but cost near-nominal
+feasibility (77 -> 57-61 %) and lengthened the far tail at >= 0.75x (1x p90 148 -> 557 km;
+the far cases are low-L/D draws — median k_CL/k_CD 0.69 — short of range). (4) The 9-12M
+segment (floor + raised caps on the 0.7x envelope) degraded the policy near nominal.
+Root cause: the terminal-precision terms (FPA / heading bonuses with 2.5 / 2 deg ramps) are
+too sharp for wide dispersions — they pay the policy to ride the constraint boundaries.
+
+### v26 — running (launched 2026-10-25 08:49): from v25 8M, 0.7x envelope, wider angle bonuses, constraint margins
+
+`--init-model results/stage2_v25/ckpt/ppo_8000000_steps.zip --lr 1e-4 --lr-decay --timesteps
+15000000`; reward: angle bonus ramps 8 / 8 deg (the v24b curriculum's level-4 values;
+w_ang_mult 1, bonuses 250, position bonus 500 at 6 km); constraints: heat-rate floor plus
+margins — heat rate charged above max(0.99, floor), load factor above 0.95 (`--qdot-floor
+--qdot-margin 0.01 --n-margin 0.05`; the env reports the thresholds, thr_*, to the PID);
+caps 10,000, ramp 100, multipliers from v25 at 8.0M (lam_Qdot 4000, lam_n 7242); ADR
+sampling at the fixed 0.7x boundary (`--disp-levels 0.7`); selection on S2_val_robust.
+Reported feasibility stays the absolute limit.

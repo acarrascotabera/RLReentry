@@ -1,0 +1,18 @@
+{
+ "level": 4,
+ "level_start": 8948544,
+ "scale": 1.0,
+ "step": 10490944,
+ "levels": [
+  0.2,
+  0.35,
+  0.5,
+  0.7,
+  1.0
+ ],
+ "min_steps": 1500000,
+ "max_steps": 4000000,
+ "window": 300,
+ "reach_min": 0.97,
+ "d_med_km": 5.0
+}

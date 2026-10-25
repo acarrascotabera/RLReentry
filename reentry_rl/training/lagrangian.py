@@ -103,7 +103,10 @@ class PIDLagrangianCallback(BaseCallback):
                 for k in CONSTRAINTS:
                     # heat rate relative to the scenario's attainable floor when the env
                     # reports one (qdot_floor), as in the reward
-                    floor = max(1.0, float(info.get("qdot_lb", 0.0))) if k == "Qdot" else 1.0
+                    if f"thr_{k}" in info:          # threshold the env charged (floor, margins)
+                        floor = float(info[f"thr_{k}"])
+                    else:
+                        floor = max(1.0, float(info.get("qdot_lb", 0.0))) if k == "Qdot" else 1.0
                     self._excess[k].append(max(0.0, float(info[f"peak_{k}"]) - floor))
         return True
 

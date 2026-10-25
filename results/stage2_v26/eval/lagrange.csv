@@ -1,0 +1,2 @@
+step,episodes,J_Qdot,viol_rate_Qdot,lam_Qdot,J_qbar,viol_rate_qbar,lam_qbar,J_n,viol_rate_n,lam_n
+16384,16,0.023664985206616723,0.875,4055.9949556198494,0.0,0.0,190.0,0.02876627649673627,0.125,7313.1333431092535

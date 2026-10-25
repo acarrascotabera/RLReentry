@@ -121,6 +121,10 @@ def parse_args():
     ap.add_argument("--qdot-floor", action="store_true",
                     help="charge the heat-rate excess above the scenario's attainable minimum "
                          "(open-loop lift-up peak) instead of above the limit")
+    ap.add_argument("--qdot-margin", type=float, default=None,
+                    help="heat-rate charge threshold 1 - margin (never below the scenario floor)")
+    ap.add_argument("--n-margin", type=float, default=None,
+                    help="load-factor charge threshold 1 - margin")
     ap.add_argument("--peak-charge", default=None, choices=["terminal", "incremental"],
                     help="episode-peak charges paid at the end (legacy) or as the running peak grows")
     ap.add_argument("--init-action-mean", default=None,
@@ -196,6 +200,10 @@ def main():
         env_kwargs["peak_charge"] = args.peak_charge
     if args.qdot_floor:
         env_kwargs["qdot_floor"] = True
+    if args.qdot_margin:
+        env_kwargs["qdot_margin"] = args.qdot_margin
+    if args.n_margin:
+        env_kwargs["n_margin"] = args.n_margin
     if args.energy_steps:
         env_kwargs["energy_steps"] = args.energy_steps
 

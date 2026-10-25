@@ -101,7 +101,7 @@ class EntryEnvBase(gym.Env):
                  obs_version=None, exact_terminal=True, rate_saturation=True,
                  scenario_sampler=None, action_mode="rate", step_mode="time",
                  energy_steps=800, dt_max=10.0, dt_late=1.0, track_gain=2.0,
-                 peak_charge="terminal", qdot_floor=False):
+                 peak_charge="terminal", qdot_floor=False, qdot_margin=0.0, n_margin=0.0):
         super().__init__()
         # private copy: DummyVecEnv hands every env the same weights object, and the
         # curriculum changes weights per env (set_reward_params)
@@ -145,7 +145,13 @@ class EntryEnvBase(gym.Env):
         # the avoidable (near-nominal) excess is no longer priced (v25 at 0.5-0.7x).
         self.qdot_floor = bool(qdot_floor)
         self._qdot_lb = 0.0
-        self._qdot_floor_eff = 1.0
+        # constraint margins (v26): the Lagrangian/peak charges start at (1 - margin) of the
+        # limit, so the policy is priced for riding the boundary; for heat rate the charge
+        # threshold is max(1 - qdot_margin, Qdot_lb) — never below what the scenario allows.
+        # Reported feasibility stays the absolute limit.
+        self.qdot_margin = float(qdot_margin)
+        self.n_margin = float(n_margin)
+        self._qdot_floor_eff = 1.0 - self.qdot_margin
         self.scenario_sampler = scenario_sampler
         self._disp_scale = None
         self.J_ref = float(j_ref) if j_ref is not None else C.J_REF_BANK_ONLY
@@ -492,7 +498,7 @@ class EntryEnvBase(gym.Env):
         self._alp_t = z[7] if self.optimize_aoa else 0.0
         if self.qdot_floor:
             self._qdot_lb = self._heat_rate_floor(z)
-            self._qdot_floor_eff = max(1.0, self._qdot_lb)
+            self._qdot_floor_eff = max(1.0 - self.qdot_margin, self._qdot_lb)
         return self._obs(), self._info()
 
     def step(self, action):
@@ -581,6 +587,7 @@ class EntryEnvBase(gym.Env):
         if self.peak_charge == "incremental":
             exc = {k: max(0.0, v - 1.0) for k, v in pk.items()}
             exc["Qdot"] = max(0.0, pk["Qdot"] - self._qdot_floor_eff)
+            exc["n"] = max(0.0, pk["n"] - (1.0 - self.n_margin))
             ep = self._exc_prev
             r -= (w.lam_Qdot * (exc["Qdot"] - ep["Qdot"]) + w.lam_qbar * (exc["qbar"] - ep["qbar"])
                   + w.lam_n * (exc["n"] - ep["n"]) + w.w_peak * (max(exc.values()) - max(ep.values())))
@@ -625,13 +632,18 @@ class EntryEnvBase(gym.Env):
             tinfo["disp_scale"] = self._disp_scale
             if self.qdot_floor:
                 tinfo["qdot_lb"] = self._qdot_lb
+            # charge thresholds actually used (read by the PID-Lagrangian callback)
+            tinfo["thr_Qdot"] = self._qdot_floor_eff
+            tinfo["thr_qbar"] = 1.0
+            tinfo["thr_n"] = 1.0 - self.n_margin
             pk = self._peaks
             if self.peak_charge == "terminal":
                 # worst path-constraint excess of the episode, charged once on every ending
                 r -= w.w_peak * max(0.0, self._peak_ratio - 1.0)
                 # per-constraint Lagrangian terms (multipliers adapted during training)
                 r -= (w.lam_Qdot * max(0.0, pk["Qdot"] - self._qdot_floor_eff)
-                      + w.lam_qbar * max(0.0, pk["qbar"] - 1.0) + w.lam_n * max(0.0, pk["n"] - 1.0))
+                      + w.lam_qbar * max(0.0, pk["qbar"] - 1.0)
+                      + w.lam_n * max(0.0, pk["n"] - (1.0 - self.n_margin)))
             tinfo["peak_ratio"] = self._peak_ratio
             tinfo["peak_Qdot"], tinfo["peak_qbar"], tinfo["peak_n"] = pk["Qdot"], pk["qbar"], pk["n"]
             terr = self._terminal_errors()
