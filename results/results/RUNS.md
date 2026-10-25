@@ -1188,3 +1188,14 @@ level), where the 1x-scale validation median was still improving (10.6 -> 4.7 km
 
 `--resume results/stage2_v25 --timesteps 21000000 --qdot-floor --disp-levels 0.2,0.35,0.5,0.7`
 (0.7 is the last level), other flags as before. Log: train_log_resume2.txt.
+
+**v25 9.0M -> 10.5M (0.7x envelope, heat-rate floor).** Near-nominal feasibility did not
+recover (nominal infeasible on 5/6 validations, 0.1x 0-25 %); the 10.0M checkpoint lands
+0.47 km off at nominal with load factor 0.63x but rides the heat-rate limit (peak 1.0006x,
+floor 0.982). With the floor, the charged heat-rate excess is the avoidable part only, yet
+lam_Qdot sat at its 4,000 cap with the mean attributable excess 1.1-1.8 % (budget 0.5 %).
+Heat rate now gets the same 10,000 cap as the load factor.
+
+### v25 resumed (4) — running (2026-10-25 02:48): from 10.5M to 30M, Qdot and n caps 10,000
+
+`--lag-max-per n=10000,Qdot=10000`, other flags as resume (3). Log: train_log_resume3.txt.

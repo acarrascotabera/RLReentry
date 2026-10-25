@@ -23,5 +23,13 @@
   "lr_restart": false,
   "lr_at_resume": 7e-05,
   "started": "2026-10-25T01:48:56"
+ },
+ {
+  "resumed_from": "ppo_10500000_steps.zip",
+  "at_steps": 10500000,
+  "extra_steps": 19500000,
+  "lr_restart": false,
+  "lr_at_resume": 6.500000000000001e-05,
+  "started": "2026-10-25T02:49:21"
  }
 ]
