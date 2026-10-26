@@ -1349,3 +1349,13 @@ points of the physical ceiling; FPA ~2.4 deg flat from 0.5x to 1x. Cost: heading
 constraint handling as v26 (8 deg angle bonuses, heat-rate floor, margins 1 % / 5 %, caps
 10,000); multipliers from v26 at 6.0M (lam_Qdot 7452, lam_n 10000); selection on
 S2_val_robust_a5_L (64 cases: nominal + 21 @0.1x, 21 @0.5x, 21 @1x, capped aero), every 500k.
+
+**v27 — stopped at 1.9M (2026-10-26 16:57).** Training at the 1x boundary under the capped
+aero model degraded the policy, as v25 did at 1x with the VISTA aero: 64-case validation
+median abs dpsi 11.3 -> 23.8 -> 28.4 deg and abs dfpa 8.2 -> 12.8 -> 10.6 deg (0.5 / 1.0 /
+1.5M), 0.1x median landing error 2.8 -> 5.1 -> 3.6 km, robust score 1.12 -> 1.25 -> 1.23,
+return 2.6k -> 2.0-2.2k, lam_n at the 10,000 cap (load-factor excess up to 7 %). At 1x about
+half of the training draws are heat-rate infeasible for any guidance (density sigma 25 % and
+VISTA entry-state errors on a 1.6 % nominal margin); with this reward the 1x level is past
+what training can use productively. v26 6M (trained on the 0.7x VISTA envelope) stays the
+robust policy; checkpoints of v27 kept in results/stage2_v27/ckpt.
