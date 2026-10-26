@@ -1,0 +1,23 @@
+{
+ "lam": {
+  "Qdot": 7452.0,
+  "qbar": 190.0,
+  "n": 10000.0
+ },
+ "I": {
+  "Qdot": 7.252,
+  "qbar": 0.0,
+  "n": 9.8
+ },
+ "e_prev": {
+  "Qdot": 0.0,
+  "qbar": 0.0,
+  "n": 0.0
+ },
+ "budget": 0.005,
+ "kp": 2000.0,
+ "ki": 1000.0,
+ "kd": 0.0,
+ "lam_init": 200.0,
+ "source": "stage2_v26 lagrange.csv at step 5996544"
+}

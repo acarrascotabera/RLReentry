@@ -43,8 +43,11 @@ FIGURE = ["v24b 30M (trained at 0.1x)", "v25 8M (boundary 0.7x)",
 TOL = 1e-3          # numerical tolerance on the attributable heat-rate check
 
 
+SET_PREFIX = "S4"          # S4: VISTA aero dispersions; S5: C_L / C_D sigma capped at 5 %
+
+
 def _set(s):
-    return f"S4_scale_x{s:g}"
+    return f"{SET_PREFIX}_scale_x{s:g}"
 
 
 def load(base, s):
@@ -76,7 +79,11 @@ def metrics(d):
 def _style(ax, title, ylabel, logy=False):
     ax.set_facecolor(SURFACE)
     if logy:
+        from matplotlib.ticker import FuncFormatter
         ax.set_yscale("log")
+        fmt = FuncFormatter(lambda v, _pos: f"{v:g}")
+        ax.yaxis.set_major_formatter(fmt)
+        ax.yaxis.set_minor_formatter(FuncFormatter(lambda v, _pos: ""))
     ax.grid(True, which="major", color=GRID, lw=0.6)
     ax.grid(True, which="minor", color=GRID, lw=0.3, alpha=0.6)
     for sp in ("top", "right"):
@@ -92,6 +99,13 @@ def _style(ax, title, ylabel, logy=False):
 
 
 def main():
+    import sys
+    global SET_PREFIX, POLICIES
+    if len(sys.argv) > 1:
+        SET_PREFIX = sys.argv[1]
+    if SET_PREFIX != "S4":           # same policies, evaluation directories named after the set
+        POLICIES = [(lab, base.parent / base.name.replace("eval_S4", f"eval_{SET_PREFIX}"))
+                    for lab, base in POLICIES]
     rows = []
     for label, base in POLICIES:
         for s in SCALES:
@@ -146,10 +160,13 @@ def main():
                      fontsize=7, color=INK2)
     handles, labels = axes.flat[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=4, frameon=False, fontsize=8, labelcolor=INK)
-    fig.suptitle("Robustness versus uncertainty level (300 cases per scale, common random numbers)",
+    model = ("VISTA dispersions" if SET_PREFIX == "S4"
+             else "VISTA dispersions, C_L / C_D sigma capped at 5 %")
+    fig.suptitle(f"Robustness versus uncertainty level ({model}; 300 cases per scale, common random numbers)",
                  fontsize=11, color=INK, x=0.01, ha="left")
     fig.tight_layout(rect=[0, 0.05, 1, 0.96])
-    fig.savefig(out / "robustness_curves.png", dpi=150, facecolor=SURFACE)
+    suffix = "" if SET_PREFIX == "S4" else f"_{SET_PREFIX}"
+    fig.savefig(out / f"robustness_curves{suffix}.png", dpi=150, facecolor=SURFACE)
     plt.close(fig)
 
     cols = ["policy", "scale", "n", "reach", "d_med", "d_p90", "fpa_med", "psi_med", "feasible", "ceiling",
@@ -157,8 +174,8 @@ def main():
     lines = ["| " + " | ".join(cols) + " |", "|" + "---|" * len(cols)]
     for _, r in tab[cols].iterrows():
         lines.append("| " + " | ".join(f"{v:.3g}" if isinstance(v, float) else str(v) for v in r) + " |")
-    (out / "robustness_table.md").write_text("\n".join(lines) + "\n")
-    print(out / "robustness_curves.png")
+    (out / f"robustness_table{suffix}.md").write_text("\n".join(lines) + "\n")
+    print(out / f"robustness_curves{suffix}.png")
     print("\n".join(lines))
 
 

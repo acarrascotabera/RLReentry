@@ -1322,3 +1322,30 @@ the cap is not active). L/D factor spread from 0.25x up: 6.5 % (1-sigma, minimum
 Heat-rate infeasible for any guidance under the capped model: 12 / 33 / 41 / 47 / 50 / 52 %
 (0.1 ... 1.25x) — barely below the VISTA-aero values: heat-rate infeasibility comes from the
 density and entry-state dispersions on a mission with a 1.6 % nominal heat-rate margin.
+
+**v26 6M under the capped aero model (S5, 300 cases per scale; S5 = S4 at 0.1x and 0.25x).**
+
+| scale | v24b 30M: median / p90 d, feasible (ceiling), abs dfpa / dpsi | v26 6M: median / p90 d, feasible, abs dfpa / dpsi |
+|---|---|---|
+| 0.1 | 1.64 / 2.87 km, 77 % (88 %), 1.14 / 2.88 deg | 1.69 / 3.21 km, 80 %, 1.54 / 4.22 deg |
+| 0.25 | 3.05 / 6.60, 58 % (67 %), 1.81 / 4.50 | 2.70 / 6.18, 60 %, 2.12 / 7.82 |
+| 0.5 | 4.90 / 20.1, 45 % (59 %), 2.59 / 7.44 | **4.00 / 10.8, 52 %**, 2.33 / 10.2 |
+| 0.75 | 8.39 / 36.4, 33 % (53 %), 3.94 / 10.6 | **5.53 / 19.4, 43 %**, 2.40 / 9.61 |
+| 1 | 14.5 / 58.0, 28 % (50 %), 4.75 / 14.5 | **7.93 / 31.4, 37 %**, 2.39 / 8.29 |
+| 1.25 | 22.9 / 106, 25 % (48 %), 5.85 / 18.1 | **11.5 / 47.3, 33 %**, 3.28 / 8.29 |
+
+With realistic aerodynamic uncertainty the far tail is gone for both policies (1.25x p95
+62 km for v26 6M, 198 km for v24b) and v26 6M degrades gracefully: median landing error 1.7
+-> 11.5 km from 0.1x to 1.25x, roughly half of v24b's beyond 0.5x; feasibility within 7-17
+points of the physical ceiling; FPA ~2.4 deg flat from 0.5x to 1x. Cost: heading 4-10 deg at
+0.1-0.5x (v24b 3-7). On the SCvx gc_models cases inside the capped envelope (138 / 501,
+|dC_L|, |dC_D| <= 15 %): no method misses by > 100 km; v26 6M p95 15.8 km (SCvx 24.2, v24b
+19.3), feasible 53 % (SCvx 38 %, v24b 46 %; ceiling 60 %), median 4.12 km (SCvx 0.24).
+
+### v27 — running: from v26 6M, trained under the capped aero model, 1x boundary
+
+`--init-model results/stage2_v26/snap_6M/model.zip --lr 6e-5 --lr-decay --timesteps 10000000
+--aero-cap 0.05 --disp-levels 1.0` (ADR: 50 % at 1x, rest uniform in [0, 1x]); reward and
+constraint handling as v26 (8 deg angle bonuses, heat-rate floor, margins 1 % / 5 %, caps
+10,000); multipliers from v26 at 6.0M (lam_Qdot 7452, lam_n 10000); selection on
+S2_val_robust_a5_L (64 cases: nominal + 21 @0.1x, 21 @0.5x, 21 @1x, capped aero), every 500k.

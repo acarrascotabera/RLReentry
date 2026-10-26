@@ -109,6 +109,16 @@ def build_robust_aero(outdir=OUT, aero_cap=AERO_CAP):
                              meta={"purpose": "model selection only (mixed scales, aero cap)",
                                    "groups": list(ROBUST_GROUPS), "aero_cap": aero_cap,
                                    "first_is_nominal": True}))
+    p = outdir / "S2_val_robust_a5_L.json"          # larger selection set (64 cases)
+    if not p.exists():
+        scen, labels = [NOMINAL], [{"disp_scale": 0.0}]
+        for scale, n, seed in ((0.1, 21, 113), (0.5, 21, 114), (1.0, 21, 115)):
+            scen += sample_scenarios(n, ROBUST_GROUPS, scale, seed, aero_cap)
+            labels += [{"disp_scale": scale}] * n
+        made.append(save_set(p, "S2_val_robust_a5_L", scen, labels=labels,
+                             meta={"purpose": "model selection only (mixed scales, aero cap, 64 cases)",
+                                   "groups": list(ROBUST_GROUPS), "aero_cap": aero_cap,
+                                   "first_is_nominal": True}))
     for scale in ROBUST_SCALES:
         name = f"S5_scale_x{scale:g}"
         p = outdir / f"{name}.json"
