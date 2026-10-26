@@ -1252,3 +1252,32 @@ margins — heat rate charged above max(0.99, floor), load factor above 0.95 (`-
 caps 10,000, ramp 100, multipliers from v25 at 8.0M (lam_Qdot 4000, lam_n 7242); ADR
 sampling at the fixed 0.7x boundary (`--disp-levels 0.7`); selection on S2_val_robust.
 Reported feasibility stays the absolute limit.
+
+**v26 — stopped at 8.0M (2026-10-26 00:58).** Near-nominal feasibility recovered at once
+(validation: nominal feasible on every evaluation from 1.0M, 0.1x 88 %), but the terminal
+FPA alternated 2-10 deg between evaluations (weakly shaped end game with 8 deg bonuses);
+throughput fell to ~85 decisions/s with MATLAB sharing the CPU. S4 evaluation of the 6M and
+8M checkpoints (300 cases per scale):
+
+| scale | metric | v24b 30M | v25 8M | **v26 6M** | v26 8M |
+|---|---|---|---|---|---|
+| 0.1 | median d / feasible (ceiling 88 %) | 1.64 km / 77 % | 3.58 / 57 % | **1.69 / 80 %** | 1.80 / 71 % |
+| 0.1 | median abs dfpa / dpsi | 1.14 / 2.88 deg | 0.10 / 6.83 | 1.54 / 4.22 | 4.62 / 2.77 |
+| 0.1 | bank-rate RMS | 2.51 deg/s | 0.60 | 0.96 | 1.13 |
+| 0.25 | median d / feasible (ceiling 67 %) | 3.05 / 58 % | 3.96 / 41 % | **2.70 / 60 %** | 2.87 / 58 % |
+| 0.5 | median d / feasible (ceiling 55 %) | 4.94 / 38 % | 5.39 / 36 % | **4.51 / 46 %** | 4.58 / 43 % |
+| 0.5 | median abs dfpa / dpsi | 6.74 / 9.49 | 1.13 / 5.82 | 3.97 / 9.79 | 4.57 / 12.6 |
+| 0.75 | median d / feasible (ceiling 51 %) | 8.91 / 26 % | 8.79 / 31 % | **8.22 / 36 %** | 7.87 / 34 % |
+| 1 | median d / p90 d / feasible (ceiling 48 %) | 17.1 / 148 / 19 % | 14.4 / 557 / 26 % | **13.0 / 606 / 28 %** | 13.9 / 653 / 27 % |
+| 1 | median abs dfpa / dpsi | 9.13 / 20.5 | 2.76 / 12.2 | 2.82 / 12.4 | 2.97 / 17.0 |
+| 1.25 | median d / feasible (ceiling 47 %) | 32.7 / 15 % | 22.6 / 21 % | **21.1 / 23 %** | 21.3 / 22 % |
+
+v26 6M is the best robust policy so far: the most often feasible at every scale (80 % vs the
+88 % physical ceiling at the realistic level), the lowest median landing error from 0.25x up
+(13 vs 17 km at 1x, 21 vs 33 km at 1.25x), FPA error ~3x lower than v24b beyond 0.5x, 2.6x
+less bank activity than v24b near nominal; all 1,800 cases reach the handover. Costs: heading
++1.3 deg and FPA +0.4 deg at 0.1x vs v24b, and the far tail beyond 0.75x stays longer than
+v24b's (1x p90 606 vs 148 km; low-L/D draws short of range). The 6M -> 8M drift (FPA 1.5 ->
+4.6 deg at 0.1x) shows the 24-case robust validation cannot select reliably (v26's best by
+score was at 0.5M). Snapshot: results/stage2_v26/snap_6M; full suite incl. the SCvx
+campaigns running (eval_mc_6M).
