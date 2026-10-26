@@ -1281,3 +1281,26 @@ v24b's (1x p90 606 vs 148 km; low-L/D draws short of range). The 6M -> 8M drift 
 4.6 deg at 0.1x) shows the 24-case robust validation cannot select reliably (v26's best by
 score was at 0.5M). Snapshot: results/stage2_v26/snap_6M; full suite incl. the SCvx
 campaigns running (eval_mc_6M).
+
+**v26 6M — full benchmark suite (eval_mc_6M) and SCvx head-to-head.** Realistic test S3_x0.1
+(500): median 1.75 km (v24b 30M 1.36), feasible 80 % (79 %), median abs dfpa / dpsi 1.26 /
+3.56 deg (1.16 / 2.77), p95 peak 1.011 (1.011), bank-rate RMS 0.94 deg/s (2.83).
+
+| campaign | policy | median d | p90 / p95 d | <= 1 / 5 / 10 km | feasible | ceiling | attributable feasible | viol. Qdot / n | median abs dfpa / dpsi |
+|---|---|---|---|---|---|---|---|---|---|
+| gc_ic_tc (1001) | SCvx closed-loop G&C | **0.21 km** | 53 / 307 km | **62 / 67 / 71 %** | 39 % | 56 % | 49 % | 48 / 19 % | **0.30 / 0.62 deg** |
+| gc_ic_tc | v24b 30M | 10.5 | 53 / 89 | 2 / 28 / 49 % | 34 % | 56 % | 34 % | 47 / 33 % | 4.99 / 10.9 |
+| gc_ic_tc | **v26 6M** | 6.00 | **25 / 33** | 1 / 43 / 66 % | **45 %** | 56 % | 45 % | 46 / **11 %** | 3.84 / 9.18 |
+| gc_models (501) | SCvx closed-loop G&C | **0.33** | 37 / 102 | **56 / 64 / 68 %** | 34 % | 58 % | 39 % | 55 / 25 % | **0.54 / 1.08** |
+| gc_models | v24b 30M | 5.29 | 39 / 316 | 4 / 46 / 67 % | 35 % | 58 % | 35 % | 57 / 21 % | 10.4 / 17.7 |
+| gc_models | **v26 6M** | 7.22 | 563 / 1394 | 3 / 37 / 60 % | **41 %** | 58 % | 41 % | 55 / **15 %** | 3.47 / 10.6 |
+
+(ceiling = cases whose heat-rate floor is <= 1; attributable feasible = heat rate <= max(1,
+floor), qbar <= 1, n <= 1.) On both SCvx campaigns v26 6M is feasible more often than SCvx
+(45 vs 39 %, 41 vs 34 %), with fewer load-factor violations (11 vs 19 %, 15 vs 25 %) and, on
+gc_ic_tc, a far shorter tail (p95 33 vs 307 km); SCvx is far more precise in the bulk (62 %
+within 1 km). Weakness found: on gc_models v26 6M misses 84 / 501 cases by > 100 km (median
+813 km) — low-L/D draws (median k_CL/k_CD 0.65) that SCvx reaches (median 1.25 km on those
+cases; only 31 % > 100 km) and v24b mostly handles (median 51 km). So that tail is
+guidance-attributable: the robust training lost range stretching for low-L/D vehicles
+(those draws are ~2-sigma events at the 0.7x training envelope).
