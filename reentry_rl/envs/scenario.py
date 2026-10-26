@@ -15,6 +15,12 @@ All are independent Gaussians clipped to the VISTA bounds. VISTA states that
 its IC magnitudes are about an order of magnitude wider than Apollo-class
 delivery errors (stress test); `sigma_scale` rescales sigma and clip bounds
 together, so sigma_scale=0.1 gives the "realistic" level.
+
+aero_cap (2026-10-26): VISTA's g_models disperses C_L and C_D independently with 1-sigma
+20 % ("stress test"), i.e. an L/D spread of ~28 % for one characterised vehicle. With
+aero_cap = c the aerodynamic factors use sigma = min(0.20 * scale, c) and clip half-width
+= min(0.50 * scale, 3 c); every other parameter keeps the VISTA magnitudes under the
+scale. aero_cap = None reproduces the VISTA model (legacy sets and runs).
 """
 import json
 from dataclasses import dataclass, asdict, fields, replace
@@ -91,12 +97,19 @@ def _params(groups):
     return [k for k, (g, *_) in DISPERSIONS.items() if g in groups]
 
 
-def _scaled(name, sigma_scale):
+AERO_FACTORS = ("k_CL", "k_CD")
+
+
+def _scaled(name, sigma_scale, aero_cap=None):
     _g, mean, sigma, lo, hi = DISPERSIONS[name]
+    if aero_cap is not None and name in AERO_FACTORS:
+        sig = min(sigma * sigma_scale, aero_cap)
+        hw = min((hi - mean) * sigma_scale, 3.0 * aero_cap)
+        return mean, sig, mean - hw, mean + hw
     return mean, sigma * sigma_scale, mean + (lo - mean) * sigma_scale, mean + (hi - mean) * sigma_scale
 
 
-def sample_scenarios(n, groups=("ic", "models"), sigma_scale=1.0, seed=0):
+def sample_scenarios(n, groups=("ic", "models"), sigma_scale=1.0, seed=0, aero_cap=None):
     """n independent clipped-Gaussian draws over the selected groups."""
     rng = np.random.default_rng(seed)
     names = _params(groups)
@@ -104,19 +117,19 @@ def sample_scenarios(n, groups=("ic", "models"), sigma_scale=1.0, seed=0):
     for _ in range(int(n)):
         vals = {}
         for k in names:
-            mean, sigma, lo, hi = _scaled(k, sigma_scale)
+            mean, sigma, lo, hi = _scaled(k, sigma_scale, aero_cap)
             vals[k] = float(np.clip(rng.normal(mean, sigma), lo, hi))
         out.append(replace(NOMINAL, **vals))
     return out
 
 
 def sweep_scenarios(groups=("ic", "tc", "models"), multipliers=(-3, -2, -1, 1, 2, 3),
-                    sigma_scale=1.0):
+                    sigma_scale=1.0, aero_cap=None):
     """One-parameter-at-a-time sweep at mean + m*sigma (clipped). Returns
     [(param, multiplier, Scenario)] for sensitivity plots."""
     out = []
     for k in _params(groups):
-        mean, sigma, lo, hi = _scaled(k, sigma_scale)
+        mean, sigma, lo, hi = _scaled(k, sigma_scale, aero_cap)
         for m in multipliers:
             out.append((k, float(m), replace(NOMINAL, **{k: float(np.clip(mean + m * sigma, lo, hi))})))
     return out
@@ -132,7 +145,8 @@ class ScenarioSampler:
     in [0, sigma_scale] (ADR-style boundary sampling; the boundary is moved by
     training/dispersion_curriculum.py). The scale of the last draw is `last_scale`."""
 
-    def __init__(self, groups=("ic", "models"), sigma_scale=1.0, mode="fixed", p_edge=0.5):
+    def __init__(self, groups=("ic", "models"), sigma_scale=1.0, mode="fixed", p_edge=0.5,
+                 aero_cap=None):
         if mode not in ("fixed", "adr"):
             raise ValueError("mode must be 'fixed' or 'adr'")
         self.groups = tuple(groups)
@@ -140,6 +154,7 @@ class ScenarioSampler:
         self.names = _params(self.groups)
         self.mode = mode
         self.p_edge = float(p_edge)
+        self.aero_cap = None if aero_cap is None else float(aero_cap)
         self.last_scale = self.sigma_scale
 
     def __call__(self, rng):
@@ -149,7 +164,7 @@ class ScenarioSampler:
         self.last_scale = s
         vals = {}
         for k in self.names:
-            mean, sigma, lo, hi = _scaled(k, s)
+            mean, sigma, lo, hi = _scaled(k, s, getattr(self, "aero_cap", None))
             vals[k] = float(np.clip(rng.normal(mean, sigma), lo, hi))
         return replace(NOMINAL, **vals)
 
@@ -160,6 +175,8 @@ class ScenarioSampler:
         d = {"groups": list(self.groups), "sigma_scale": self.sigma_scale}
         if self.mode != "fixed":
             d.update(mode=self.mode, p_edge=self.p_edge)
+        if getattr(self, "aero_cap", None) is not None:
+            d["aero_cap"] = self.aero_cap
         return d
 
 

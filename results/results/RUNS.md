@@ -1304,3 +1304,21 @@ within 1 km). Weakness found: on gc_models v26 6M misses 84 / 501 cases by > 100
 cases; only 31 % > 100 km) and v24b mostly handles (median 51 km). So that tail is
 guidance-attributable: the robust training lost range stretching for low-L/D vehicles
 (those draws are ~2-sigma events at the 0.7x training envelope).
+
+### Aerodynamic dispersion model corrected (2026-10-26)
+
+VISTA's g_models disperses C_L and C_D independently with 1-sigma 20 % (clip +-50 %; labelled
+"Stress-test mass / aero / atmosphere"), an L/D spread of ~29 % (1-sigma; minimum 0.34x on the
+1x set) — far beyond the aerodynamic uncertainty of one characterised vehicle (the WB001). The
+"low-L/D tail" found above (v26 6M misses 84 / 501 gc_models cases by > 100 km, median
+k_CL/k_CD 0.65) is therefore mostly an artefact of the stress-test aero model, not a training
+target. Decision (user, 2026-10-26): C_L and C_D 1-sigma 5 % each (clip +-15 %), only the aero
+is capped; entry state, target, density (25 %) and mass (5 %) keep the VISTA magnitudes.
+Implemented as `aero_cap`: sigma = min(0.20 x scale, 0.05), clip half-width min(0.50 x scale,
+0.15) (the 0.1x realistic level keeps its 2 %); `--aero-cap 0.05` for training; legacy VISTA
+model unchanged when unset. New sets (CRN with S4 — only the aero factors differ):
+S2_val_robust_a5, S5_scale_x{0.1, 0.25, 0.5, 0.75, 1, 1.25} (S5 = S4 at 0.1x and 0.25x, where
+the cap is not active). L/D factor spread from 0.25x up: 6.5 % (1-sigma, minimum 0.78x).
+Heat-rate infeasible for any guidance under the capped model: 12 / 33 / 41 / 47 / 50 / 52 %
+(0.1 ... 1.25x) — barely below the VISTA-aero values: heat-rate infeasibility comes from the
+density and entry-state dispersions on a mission with a 1.6 % nominal heat-rate margin.

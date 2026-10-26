@@ -21,6 +21,9 @@ Robustness study (python -m reentry_rl.validation.eval_sets --robust; written on
                                    case i at scale s is case i at scale 1 shrunk by s), so the
                                    performance-vs-uncertainty curves compare like with like
 
+Aero-capped robustness study (--robust-aero): S2_val_robust_a5 and S5_scale_x<s>, as above
+but with the C_L / C_D sigma capped at 5 % (CRN with S4: only the aero factors differ).
+
     python -m reentry_rl.validation.eval_sets
 """
 from pathlib import Path
@@ -88,7 +91,43 @@ def build_robust(outdir=OUT):
     return made
 
 
+AERO_CAP = 0.05
+
+
+def build_robust_aero(outdir=OUT, aero_cap=AERO_CAP):
+    """Robustness sets under the capped aerodynamic dispersions (C_L, C_D sigma <= 5 %).
+    Same seeds and parameter order as S2_val_robust / S4, so case i differs from its S4
+    counterpart only in the aerodynamic factors (common random numbers). Never overwritten."""
+    made = []
+    p = outdir / "S2_val_robust_a5.json"
+    if not p.exists():
+        scen, labels = [NOMINAL], [{"disp_scale": 0.0}]
+        for scale, n, seed in ((0.1, 8, 103), (0.5, 8, 104), (1.0, 7, 105)):
+            scen += sample_scenarios(n, ROBUST_GROUPS, scale, seed, aero_cap)
+            labels += [{"disp_scale": scale}] * n
+        made.append(save_set(p, "S2_val_robust_a5", scen, labels=labels,
+                             meta={"purpose": "model selection only (mixed scales, aero cap)",
+                                   "groups": list(ROBUST_GROUPS), "aero_cap": aero_cap,
+                                   "first_is_nominal": True}))
+    for scale in ROBUST_SCALES:
+        name = f"S5_scale_x{scale:g}"
+        p = outdir / f"{name}.json"
+        if not p.exists():
+            made.append(save_set(p, name, sample_scenarios(300, ROBUST_GROUPS, scale, 2030, aero_cap),
+                                 labels=[{"disp_scale": scale}] * 300,
+                                 meta={"purpose": "reporting only (robustness vs scale, CRN, aero cap)",
+                                       "groups": list(ROBUST_GROUPS), "sigma_scale": scale,
+                                       "aero_cap": aero_cap, "seed": 2030}))
+    return made
+
+
 if __name__ == "__main__":
     import sys
-    for p in (build_robust() if "--robust" in sys.argv[1:] else build_all()):
+    if "--robust-aero" in sys.argv[1:]:
+        made = build_robust_aero()
+    elif "--robust" in sys.argv[1:]:
+        made = build_robust()
+    else:
+        made = build_all()
+    for p in made:
         print(p)

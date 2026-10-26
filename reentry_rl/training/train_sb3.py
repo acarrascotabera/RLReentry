@@ -109,6 +109,8 @@ def parse_args():
     ap.add_argument("--disp-levels", default=None,
                     help="dispersion curriculum: boundary scales, e.g. 0.2,0.35,0.5,0.7,1.0 "
                          "(ADR-style sampling; needs --train-dispersion)")
+    ap.add_argument("--aero-cap", type=float, default=None,
+                    help="cap the C_L / C_D dispersion sigma (e.g. 0.05); default: VISTA, 0.20 x scale")
     ap.add_argument("--disp-p-edge", type=float, default=0.5,
                     help="fraction of episodes drawn at the boundary scale (rest uniform in [0, s])")
     ap.add_argument("--disp-min-steps", type=int, default=1_500_000)
@@ -324,9 +326,10 @@ def main():
         from reentry_rl.envs.scenario import ScenarioSampler
         groups = tuple(g.strip() for g in args.train_dispersion.split(","))
         if disp_cb is not None:
-            sampler = ScenarioSampler(groups, disp_cb.scale(), mode="adr", p_edge=args.disp_p_edge)
+            sampler = ScenarioSampler(groups, disp_cb.scale(), mode="adr", p_edge=args.disp_p_edge,
+                                      aero_cap=args.aero_cap)
         else:
-            sampler = ScenarioSampler(groups, args.train_sigma_scale)
+            sampler = ScenarioSampler(groups, args.train_sigma_scale, aero_cap=args.aero_cap)
         train_env_kwargs["scenario_sampler"] = sampler
         print(f"[dispersion] training on {sampler.describe()}")
     venv = build_vecenv(env_cls, args.n_envs, weights, args.n_substeps, args.seed, subproc,
