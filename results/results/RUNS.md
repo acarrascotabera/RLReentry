@@ -1359,3 +1359,9 @@ half of the training draws are heat-rate infeasible for any guidance (density si
 VISTA entry-state errors on a 1.6 % nominal margin); with this reward the 1x level is past
 what training can use productively. v26 6M (trained on the 0.7x VISTA envelope) stays the
 robust policy; checkpoints of v27 kept in results/stage2_v27/ckpt.
+
+### v28 — running (launched 2026-10-26 17:04): from v26 6M, 0.7x envelope under the capped aero model
+
+As v27 but `--disp-levels 0.7` (user decision: one more training stage at the 0.7x
+envelope with the corrected aerodynamic dispersions); 64-case selection set
+S2_val_robust_a5_L every 500k; LR 6e-5 decaying over 10M decisions.
