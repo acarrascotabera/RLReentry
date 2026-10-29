@@ -37,9 +37,11 @@ POLICIES = [("v24b 30M (trained at 0.1x)", RES / "stage2_v24b/eval_S4_final_30M"
             ("v25 8M (boundary 0.7x)", RES / "stage2_v25/eval_S4_ck8M"),
             ("v25 11.5M (0.7x, heat floor)", RES / "stage2_v25/eval_S4_ck11p5M"),
             ("v26 6M (0.7x, margins, 8 deg bonuses)", RES / "stage2_v26/eval_S4_ck6M"),
-            ("v26 8M (0.7x, margins, 8 deg bonuses)", RES / "stage2_v26/eval_S4_ck8M")]
-FIGURE = ["v24b 30M (trained at 0.1x)", "v25 8M (boundary 0.7x)",
-          "v26 6M (0.7x, margins, 8 deg bonuses)", "v26 8M (0.7x, margins, 8 deg bonuses)"]
+            ("v26 8M (0.7x, margins, 8 deg bonuses)", RES / "stage2_v26/eval_S4_ck8M"),
+            ("v28 9.5M (0.7x, capped aero)", RES / "stage2_v28/eval_S4_ck9p5M"),
+            ("v28 10M (0.7x, capped aero)", RES / "stage2_v28/eval_S4_ck10M")]
+FIGURE = ["v24b 30M (trained at 0.1x)", "v26 6M (0.7x, margins, 8 deg bonuses)",
+          "v28 9.5M (0.7x, capped aero)", "v28 10M (0.7x, capped aero)"]
 TOL = 1e-3          # numerical tolerance on the attributable heat-rate check
 
 
