@@ -163,6 +163,7 @@ def parse_args():
     ap.add_argument("--batch-size", type=int, default=None, help="override PPO minibatch size")
     ap.add_argument("--n-steps", type=int, default=None, help="override PPO rollout length per env")
     ap.add_argument("--n-epochs", type=int, default=None, help="override PPO epochs per update")
+    ap.add_argument("--gae-lambda", type=float, default=None, help="override PPO GAE lambda")
     ap.add_argument("--target-kl", type=float, default=None,
                     help="stop an update's epochs early once approx KL > 1.5 x this (PPO target_kl)")
     ap.add_argument("--init-model", default=None,
@@ -268,6 +269,8 @@ def main():
             ppo_kwargs["n_steps"] = args.n_steps
         if args.n_epochs is not None:
             ppo_kwargs["n_epochs"] = args.n_epochs
+        if args.gae_lambda is not None:
+            ppo_kwargs["gae_lambda"] = args.gae_lambda
         if args.target_kl is not None:
             ppo_kwargs["target_kl"] = args.target_kl
         if args.net_arch:
@@ -398,6 +401,10 @@ def main():
             overrides["gamma"] = args.gamma
         if args.target_kl is not None:
             overrides["target_kl"] = args.target_kl
+        # rollout / update shape (PPO.load rebuilds the rollout buffer with these)
+        for k in ("n_steps", "batch_size", "n_epochs", "gae_lambda"):
+            if getattr(args, k) is not None:
+                overrides[k] = getattr(args, k)
         model = PPO.load(args.init_model, env=venv, seed=args.seed, device="cpu",
                          tensorboard_log=tb_log, verbose=1, **overrides)
         print(f"[init] warm-started from {args.init_model} (overrides: {sorted(overrides)})")
