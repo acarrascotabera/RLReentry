@@ -1360,8 +1360,31 @@ VISTA entry-state errors on a 1.6 % nominal margin); with this reward the 1x lev
 what training can use productively. v26 6M (trained on the 0.7x VISTA envelope) stays the
 robust policy; checkpoints of v27 kept in results/stage2_v27/ckpt.
 
-### v28 — running (launched 2026-10-26 17:04): from v26 6M, 0.7x envelope under the capped aero model
+### v28 — done (launched 2026-10-26 17:04, finished 2026-10-27 14:50): from v26 6M, 0.7x envelope under the capped aero model
 
 As v27 but `--disp-levels 0.7` (user decision: one more training stage at the 0.7x
 envelope with the corrected aerodynamic dispersions); 64-case selection set
 S2_val_robust_a5_L every 500k; LR 6e-5 decaying over 10M decisions.
+
+**v28 — finished at 10M (2026-10-27 14:50, 1307 min); not better than v26 6M.** Best by the
+64-case robust score at 9.5M (0.984; 10M 0.985; v26 6M 0.998 on the same set). That set
+favoured v28 on heading (median |dpsi| 2.4 vs 8.0 deg), but the 300-case CRN sets do not
+confirm an improvement (eval_S4_ck9p5M, eval_S4_ck10M, eval_S5_ck9p5M, eval_S5_ck10M):
+
+| set / scale | v26 6M: median d, p90 d, feasible | v28 9.5M | v28 10M |
+|---|---|---|---|
+| S4/S5 0.1x  | 1.69 km, 3.2 km, 80 % | 2.32 km, 5.0 km, 64 % | 2.44 km, 5.2 km, 72 % |
+| S4/S5 0.25x | 2.70, 6.2, 60 % | 5.11, 13.7, 46 % | 4.95, 12.1, 51 % |
+| S5 0.5x     | 4.00, 10.8, 52 % | 7.08, 22.7, 43 % | 6.91, 20.7, 44 % |
+| S5 1x       | 7.93, 31.4, 37 % | 11.9, 50.2, 33 % | 10.9, 48.2, 34 % |
+| S4 1x       | 13.0, 606, 28 % | 45.6, 1160, 25 % | 45.4, 1250, 26 % |
+
+v28 is worse on landing error and feasibility at every scale of both sets; its only gains are
+heading at low dispersion (S5 0.1x median |dpsi| 1.3 deg at 9.5M vs 4.2) and FPA at 0.1x
+(1.1 vs 1.5 deg). Training under the capped aero model cost accuracy under the VISTA aero
+(S4 1x median 45 vs 13 km), as expected, but did not buy accuracy under the capped model
+either. During training lam_n stayed at the 10,000 cap and lam_Qdot reached 9454, with the
+heat-rate constraint violated in ~65 % of the last training window: constraint pressure was
+saturated. The 64-case selection set (21 cases per scale) is too small to rank policies that
+differ by a few km. v26 6M stays the reference robust policy. The first evaluation launch
+hung in a worker respawn (WinError 5) after the 0.1x scale and was relaunched detached.
