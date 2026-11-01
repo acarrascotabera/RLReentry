@@ -1423,3 +1423,53 @@ Median landing error is within about 1 km of v26 6M at most scales, with small g
 151-case selection set is too small to rank policies that differ by a kilometre, the same lesson as v28.
 v26 6M stays the reference robust policy. Study outputs: `results/hpo_v26/best.json`, `trials.csv`,
 `hpo_log.txt`, `hpo_err.txt`. Checkpoints of the 20 trials are not in git.
+
+## Stability analyses of v26 6M — done
+
+Suite: `reentry_rl/validation/stability.py` (perturbed env, open-loop replay, pooled studies), report:
+`reentry_rl/postprocessing/stability_report.py`. Outputs: `results/stability_v26/` (figures, `stability_tables.md`,
+per-condition CSVs and summaries; recovery trajectories and the per-decision Jacobian are not in git).
+Margin base set: nominal + first 100 cases of `S4_scale_x0.1`, common random numbers across levels.
+Baseline: median d 1.79 km, p95 4.1 km, strictly feasible 76 %. Margin criterion: median d <= 2x baseline
+and feasible fraction >= baseline - 10 points.
+
+| perturbation class | within margin up to | first level outside (median d, feasible) |
+|---|---|---|
+| navigation errors (bias + white noise; 1x = 300 m, 1 m/s, 0.05 deg, 1 % accel) | 1x spec (3.35 km) | 2x: 6.1 km, 65 % |
+| pure command delay | 1 s (2.42 km) | 2 s: 3.66 km; 8 s: feasibility 0 |
+| extra first-order lag | 2 s (3.27 km) | 4 s: 5.16 km; 8 s: feasibility 0 |
+| bank-rate limit (nominal 45 deg/s) | 5 deg/s (1.85 km) | none |
+| bank-command gain | none | 0.95: 13.8 km; 1.05: 4.7 km; 0.85: 80 km |
+| bank-command bias | +1 deg (2.15 km) | -1 deg: 4.4 km; -2 deg: 8.5 km; -5 deg: 24 km |
+| kicks FPA +-1 deg, V -100 m/s at energy-to-go 0.7 / 0.35 | all (<= 1.85 km) | FPA -1 deg early: feasibility 62 % |
+| kicks at energy-to-go 0.08 | FPA +-1 deg (<= 2.5 km) | heading +5 deg: 8.5 km; V -100 m/s: 10.4 km |
+| heading +5 deg kick | early (1.94 km) | mid: 6.0 km |
+| density waves (10 km wavelength) | none on feasibility | +-10 %: 1.75 km but 53 % feasible; +-20 %: 0 % |
+| density bump at 55 km | -30 % (3.0 km) | +30 %: 9.4 km |
+
+Closed vs open loop (nominal mission; open loop replays the nominal commands by time): attenuation of the
+terminal displacement 12-15x (mass), 28-35x (entry altitude), 62-68x (density), 95-127x (entry FPA, speed),
+119-202x (C_L, C_D), 270-360x (entry heading, latitude). Recovery after a kick: closed loop 1.2-2.8 km at
+the handover for FPA and early/mid speed kicks, vs 11-262 km open loop.
+
+Entry corridor (FPA -2.0..0.0 deg x speed +-400 m/s): landing error <= 5 km over a band of about
+-160..+80 m/s across all FPA offsets. 70 % of the grid has a heat-rate floor > 1 (infeasible for any guidance):
+the nominal mission peaks at 0.986 of the heat-rate limit, so the corridor is bounded by the heat rate.
+Target footprint (+-6 deg lat/lon): 93 % reached and feasible, 82 % within 5 km; failures only at the
+south-west corner (lat -1..-6, lon -4..-6 deg).
+
+Policy Jacobian ||d [bank, AoA] / d normalized obs||_2: median 67, p95 89, max 92 deg per unit feature,
+smooth along the trajectory with no spikes (Lipschitz-type bound for the paper).
+
+Combined realistic stack (nav at spec + 1 s delay + 1 s lag + 30 deg/s + 10 % density waves), 300 cases:
+S4 0.1x median d 1.69 -> 4.70 km, p95 3.7 -> 13.7 km, feasible 80 -> 32 %; S4 0.25x 2.70 -> 4.89 km,
+feasible 60 -> 34 %. The feasibility loss comes from the density waves (heat-rate margin 1.4 %).
+
+**Conclusions.** Strong feedback attenuation of initial-state and model errors, ample rate-limit margin and
+about 1-2 s of delay/lag margin. Two weaknesses for the paper: (1) bank-execution errors: a 5 % bank
+effectiveness error or a -1 deg bias multiplies the miss by 2.5-8. This is not observation inconsistency
+(showing the policy its commanded bank instead of the achieved one changes the 0.85 miss only 80 -> 65 km).
+The nominal trajectory does most of its crossrange in the last 8 % of energy, so reduced lateral authority
+cannot be recovered; late kicks show the same. (2) heat-rate margin of 1.4 %, so any unmodelled density
+structure breaks strict feasibility. Remedies: randomize bank gain/bias in training (actuator domain
+randomization), and a heat-rate margin in the reward/constraint (e.g. 0.95 limit).

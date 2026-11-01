@@ -36,6 +36,10 @@ results/**
 !results/**/eval_S4*/**
 !results/eval_sets/floors/**
 !results/curves/robustness_*
+!results/stability_*/figures/**
+!results/stability_*/**/*.csv
+results/stability_*/recovery/traj_*.csv
+results/stability_*/jacobian/jacobian.csv
 results/**/eval/**/*.png
 results/**/eval/**/*.svg
 results/**/eval_mc*/**/*.png
