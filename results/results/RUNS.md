@@ -1388,3 +1388,38 @@ heat-rate constraint violated in ~65 % of the last training window: constraint p
 saturated. The 64-case selection set (21 cases per scale) is too small to rank policies that
 differ by a few km. v26 6M stays the reference robust policy. The first evaluation launch
 hung in a worker respawn (WinError 5) after the 0.1x scale and was relaunched detached.
+
+### HPO of PPO around v26 6M — done (study hpo_v26, 2026-10-29 23:51 to 2026-10-30 22:49, 22.9 h)
+
+Optuna TPE (multivariate, 6 startup trials) with MedianPruner over 20 trials of 1M steps each, warm-started from
+v26 6M (`results/stage2_v26/snap_6M`) with the v28 configuration as reference
+(`hpo_robust.py`). Objective: min over the final and best checkpoints of the robust score on the 151-case
+selection set `S2_sel_a5_M` (nominal + 50 cases each at 0.1x, 0.5x, 1x; aero cap 0.05). Result: 8 trials
+completed, 12 pruned at 250k-500k steps.
+
+Best trial 10 (selection score 0.965; baseline trial 0 with the v28 PPO settings 1.100):
+lr 6.8e-5, n_steps 1024, batch 256, n_epochs 9, 1-gamma 1.3e-4, gae_lambda 0.933, clip 0.203,
+ent_coef 9.2e-6, target_kl 0.1, std_mult 0.43. Chosen checkpoint: best (`trial_010/best/best_model.zip`).
+
+300-case common-random-number evaluation of trial 10 against v26 6M (`trial_010/eval_S4_best`,
+`trial_010/eval_S5_best`; v26 6M from `stage2_v26/eval_S4_ck6M`, `stage2_v26/eval_S5_ck6M`):
+
+| set / scale | v26 6M: median d, p90 d, feasible | HPO trial 10: median d, p90 d, feasible |
+|---|---|---|
+| S4/S5 0.1x  | 1.69 km, 3.2 km, 80 % | 1.45 km, 2.5 km, 70 % |
+| S4/S5 0.25x | 2.70, 6.2, 60 % | 2.35, 5.0, 57 % |
+| S4 0.5x     | 4.51, 15.1, 46 % | 4.52, 13.0, 41 % |
+| S5 0.5x     | 4.00, 10.8, 52 % | 3.97, 10.4, 48 % |
+| S4 1x       | 13.0, 606, 28 % | 12.8, 780, 24 % |
+| S5 1x       | 7.93, 31.4, 37 % | 6.94, 26.0, 34 % |
+| S4 1.25x    | 21.1, 1370, 23 % | 21.6, 1550, 19 % |
+| S5 1.25x    | 11.5, 62.3, 33 % | 9.83, 44.1, 30 % |
+
+(S5 0.1x and 0.25x equal the S4 values by construction.)
+
+**Conclusion: not an improvement.** The selection-set gain did not carry over to the 300-case sets.
+Median landing error is within about 1 km of v26 6M at most scales, with small gains only at S5 1x and
+1.25x, where feasibility is also lower. Feasibility is 3 to 9 points lower at almost every scale. The
+151-case selection set is too small to rank policies that differ by a kilometre, the same lesson as v28.
+v26 6M stays the reference robust policy. Study outputs: `results/hpo_v26/best.json`, `trials.csv`,
+`hpo_log.txt`, `hpo_err.txt`. Checkpoints of the 20 trials are not in git.
