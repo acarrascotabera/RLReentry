@@ -1472,4 +1472,22 @@ effectiveness error or a -1 deg bias multiplies the miss by 2.5-8. This is not o
 The nominal trajectory does most of its crossrange in the last 8 % of energy, so reduced lateral authority
 cannot be recovered; late kicks show the same. (2) heat-rate margin of 1.4 %, so any unmodelled density
 structure breaks strict feasibility. Remedies: randomize bank gain/bias in training (actuator domain
-randomization), and a heat-rate margin in the reward/constraint (e.g. 0.95 limit).
+randomization). Correction (2026-11-02): a heat-rate margin is not available on this mission. The nominal
+heat-rate floor (lift-up flight, the least peak any guidance can reach) is 0.982 and v26 6M peaks at 0.986,
+so the 1.4 % margin is a property of the entry conditions, not of the guidance; at most about 0.4 points
+can be gained nominally.
+
+### v29 — running (launched 2026-11-02 20:55): from v26 6M, bank actuator randomization, heat margin 5 %
+
+v28 configuration (command in `results/stage2_v29/launch_cmd.json`; built from the v28-reference HPO
+trial 0) with:
+- training-only bank execution errors: per episode the bank target is executed as g * target + b,
+  g ~ U(0.93, 1.07), b ~ U(-2, 2) deg (`--bank-gain-dev 0.07 --bank-bias-deg 2`; envs/entry_env_base.py).
+  Validation and the evaluation sets keep the ideal actuator.
+- `--qdot-margin 0.05`: heat rate charged above max(0.95, floor), i.e. at the floor for most draws
+  (nominal floor 0.982), so the policy is pushed toward the least achievable peak.
+- seed 9, 10M decisions, LR 6e-5 decaying, selection on S2_val_robust_a5_L every 500k, ent_coef 0,
+  action std from v26 6M (no override).
+First iteration: 182 decisions/s (about 15 h), heat-rate charge active in 88 % of episodes, lam_Qdot 7461.
+To check after training: the bank gain/bias margin sweeps (stability.py margins) and the 300-case S4/S5 sets
+against v26 6M.

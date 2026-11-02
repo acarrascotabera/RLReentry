@@ -127,6 +127,10 @@ def parse_args():
                     help="heat-rate charge threshold 1 - margin (never below the scenario floor)")
     ap.add_argument("--n-margin", type=float, default=None,
                     help="load-factor charge threshold 1 - margin")
+    ap.add_argument("--bank-gain-dev", type=float, default=0.0,
+                    help="training only: bank target executed with gain U(1-dev, 1+dev) per episode")
+    ap.add_argument("--bank-bias-deg", type=float, default=0.0,
+                    help="training only: bank target executed with bias U(-b, b) deg per episode")
     ap.add_argument("--peak-charge", default=None, choices=["terminal", "incremental"],
                     help="episode-peak charges paid at the end (legacy) or as the running peak grows")
     ap.add_argument("--init-action-mean", default=None,
@@ -335,6 +339,10 @@ def main():
             sampler = ScenarioSampler(groups, args.train_sigma_scale, aero_cap=args.aero_cap)
         train_env_kwargs["scenario_sampler"] = sampler
         print(f"[dispersion] training on {sampler.describe()}")
+    if args.bank_gain_dev > 0.0 or args.bank_bias_deg > 0.0:     # never in the validation env
+        train_env_kwargs["bank_gain_dev"] = args.bank_gain_dev
+        train_env_kwargs["bank_bias_deg"] = args.bank_bias_deg
+        print(f"[actuator] bank gain U(1 -/+ {args.bank_gain_dev:g}), bias U(-/+ {args.bank_bias_deg:g} deg)")
     venv = build_vecenv(env_cls, args.n_envs, weights, args.n_substeps, args.seed, subproc,
                         train_env_kwargs)
     if args.resume:                         # restore observation/return normalization stats
@@ -440,6 +448,7 @@ def main():
             "action_std": args.action_std,
             "env_kwargs": env_kwargs, "val_set": val_name, "score_mode": args.score_mode,
             "train_dispersion": (None if sampler is None else sampler.describe()),
+            "actuator_randomization": {"bank_gain_dev": args.bank_gain_dev, "bank_bias_deg": args.bank_bias_deg},
             "dispersion_curriculum": (None if disp_cb is None else disp_cb.describe()),
             "lag_restore_from": args.lag_restore_from,
             "lagrangian": (None if lagrange is None else

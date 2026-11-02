@@ -101,7 +101,8 @@ class EntryEnvBase(gym.Env):
                  obs_version=None, exact_terminal=True, rate_saturation=True,
                  scenario_sampler=None, action_mode="rate", step_mode="time",
                  energy_steps=800, dt_max=10.0, dt_late=1.0, track_gain=2.0,
-                 peak_charge="terminal", qdot_floor=False, qdot_margin=0.0, n_margin=0.0):
+                 peak_charge="terminal", qdot_floor=False, qdot_margin=0.0, n_margin=0.0,
+                 bank_gain_dev=0.0, bank_bias_deg=0.0):
         super().__init__()
         # private copy: DummyVecEnv hands every env the same weights object, and the
         # curriculum changes weights per env (set_reward_params)
@@ -152,6 +153,11 @@ class EntryEnvBase(gym.Env):
         self.qdot_margin = float(qdot_margin)
         self.n_margin = float(n_margin)
         self._qdot_floor_eff = 1.0 - self.qdot_margin
+        # actuator randomization (v29, training only): per episode the bank target is
+        # executed as g * target + b, g ~ U(1 - dev, 1 + dev), b ~ U(-bias, bias) deg
+        self.bank_gain_dev = float(bank_gain_dev)
+        self.bank_bias_deg = float(bank_bias_deg)
+        self._bank_g, self._bank_b = 1.0, 0.0
         self.scenario_sampler = scenario_sampler
         self._disp_scale = None
         self.J_ref = float(j_ref) if j_ref is not None else C.J_REF_BANK_ONLY
@@ -463,6 +469,10 @@ class EntryEnvBase(gym.Env):
         if isinstance(sc, dict):
             sc = Scenario.from_dict(sc)
         self.scenario = sc if sc is not None else NOMINAL
+        self._bank_g, self._bank_b = 1.0, 0.0
+        if self.bank_gain_dev > 0.0 or self.bank_bias_deg > 0.0:
+            self._bank_g = 1.0 + self._rng.uniform(-self.bank_gain_dev, self.bank_gain_dev)
+            self._bank_b = self._rng.uniform(-self.bank_bias_deg, self.bank_bias_deg) * _DEG
         self._model = self.scenario.model_factors()
         self._set_target(self.scenario)
 
@@ -505,7 +515,8 @@ class EntryEnvBase(gym.Env):
         a = np.asarray(action, dtype=np.float64).reshape(-1)
         if self.action_mode == "target":
             u = np.tanh(np.clip(a, -3.0, 3.0))            # normalized command in (-1, 1)
-            self._sig_t = float(u[0]) * C.BANK_MAX
+            self._sig_t = float(np.clip(self._bank_g * float(u[0]) * C.BANK_MAX + self._bank_b,
+                                        C.BANK_MIN, C.BANK_MAX))
             if self.optimize_aoa:
                 lo, hi = C.ALPHA_MIN * _DEG, C.ALPHA_MAX * _DEG
                 self._alp_t = 0.5 * (lo + hi) + 0.5 * (hi - lo) * float(u[1])
