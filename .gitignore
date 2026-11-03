@@ -45,3 +45,4 @@ results/**/eval/**/*.svg
 results/**/eval_mc*/**/*.png
 results/**/eval_mc*/**/*.svg
 !results/scvx_mc/**
+!results/baselines/**

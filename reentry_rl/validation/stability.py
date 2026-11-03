@@ -39,7 +39,11 @@ All stochastic draws use common random numbers (seed = case id), so conditions d
 only in the perturbation. Outputs go to <outdir>/<study>/; finished files are skipped,
 so an interrupted run resumes.
 
+The classical baseline (reentry_rl/guidance/fnpeg.py) flies the same env, perturbations
+and draws with --guidance fnpeg (it reads the navigated state the policy would observe).
+
     python -m reentry_rl.validation.stability --outdir results/stability_v26
+    python -m reentry_rl.validation.stability --guidance fnpeg --outdir results/stability_fnpeg
 """
 import argparse
 import json
@@ -147,6 +151,7 @@ class PerturbedStage2Env(Stage2BankAoaEnv):
     def _obs(self):
         k = self.pert.nav_level
         if k <= 0.0 or self._z is None:
+            self._z_nav, self._c_nav = self._z, self._c       # navigated = true state
             return super()._obs()
         s = NAV_SPEC
         b = self._nav_bias
@@ -168,6 +173,7 @@ class PerturbedStage2Env(Stage2BankAoaEnv):
             c["D"] *= 1.0 + e[7] * s["acc_frac"]
             c["n"] = float(np.hypot(c["L"], c["D"]))
             obs = super()._obs()
+            self._z_nav, self._c_nav = zn, c                  # what a guidance law can see
         finally:
             self._z, self._c = z_true, c_true
         return obs
@@ -284,10 +290,13 @@ class StabilityRunner(ep.PolicyRunner):
         if self.mode == "open":
             i = max(int(np.searchsorted(self._sched_t, self.env.t, side="right")) - 1, 0)
             return self._sched_a[i]
-        a = super().act(obs)
+        a = self._closed_loop_act(obs)
         if self._rec is not None:
             self._rec.append((self.env.t, a.copy()))
         return a
+
+    def _closed_loop_act(self, obs):
+        return ep.PolicyRunner.act(self, obs)
 
     def nominal_schedule(self):
         """Closed-loop nominal command history (time, raw action) for open-loop replay."""
@@ -311,6 +320,32 @@ class StabilityRunner(ep.PolicyRunner):
             self.mode = "closed"
 
 
+class FnpegRunner(StabilityRunner):
+    """Same rollouts with the FNPEG baseline in place of the policy: the guidance reads the
+    navigated state (env._z_nav / _c_nav) and its (bank, AoA) command is mapped onto the
+    env's target-mode action, so actuators, perturbations and metrics are identical."""
+
+    def __init__(self, env_kwargs, cfg=None):
+        from reentry_rl.guidance.fnpeg import FnpegGuidance
+        kw = dict(env_kwargs)
+        kw.setdefault("obs_version", "v25")
+        self.env = PerturbedStage2Env(weights=RewardWeights(), **kw)
+        self.j_ref = self.env.J_ref
+        self.guid = FnpegGuidance(cfg)
+        self.mode = "closed"
+        self._sched_t = self._sched_a = None
+        self._rec = None
+
+    def _closed_loop_act(self, obs):
+        env = self.env
+        if env.steps == 0:
+            self.guid.reset(env)
+        sig, alp = self.guid.command(env)
+        lo, hi = C.ALPHA_MIN, C.ALPHA_MAX
+        u = np.array([sig / C.BANK_MAX, (alp - 0.5 * (lo + hi)) / (0.5 * (hi - lo))])
+        return np.arctanh(np.clip(u, -0.995, 0.995)).astype(np.float32)
+
+
 _W = {}
 
 
@@ -318,6 +353,9 @@ def _init_worker(model_path, vn_path, env_kwargs):
     import torch
     torch.set_num_threads(1)
     ep.TRAJ_FIELDS = ep.TRAJ_FIELDS + ["energy_togo"]
+    if str(model_path) == "fnpeg":
+        _W["runner"] = FnpegRunner(env_kwargs)
+        return
     model, rms = ep.load_policy(model_path, vn_path)
     _W["runner"] = StabilityRunner(model, rms, env_kwargs)
 
@@ -381,9 +419,9 @@ class Pool:
     """One persistent worker pool for the whole suite (pool respawns between sets
     have hung on Windows with WinError 5)."""
 
-    def __init__(self, workers, env_kwargs):
+    def __init__(self, workers, env_kwargs, model=None, vn=None):
         self.workers = workers
-        args = (str(MODEL), str(VN), env_kwargs)
+        args = (str(model or MODEL), str(vn or VN), env_kwargs)
         if workers <= 1:
             _init_worker(*args)
             self.pool = None
@@ -557,20 +595,38 @@ def main():
     ap.add_argument("--studies", nargs="+", default=list(STUDIES), choices=STUDIES)
     ap.add_argument("--n-base", type=int, default=100, help="0.1x cases in the margin base set")
     ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--guidance", choices=("rl", "fnpeg"), default="rl",
+                    help="rl: the policy at --model/--vn; fnpeg: the classical baseline (same env)")
+    ap.add_argument("--model", default=None, help="policy zip (default: v26 6M)")
+    ap.add_argument("--vn", default=None, help="VecNormalize pickle of --model")
+    ap.add_argument("--conditions", nargs="+", default=None,
+                    help="margin conditions to run (names, e.g. baseline gain_0.95); default all")
     args = ap.parse_args()
+    global MODEL, VN
+    if args.model:
+        MODEL, VN = Path(args.model).resolve(), Path(args.vn).resolve()
+    if args.conditions:
+        keep, allc = set(args.conditions), margin_conditions
+        globals()["margin_conditions"] = lambda: [c for c in allc() if c[0] in keep]
     out = Path(args.outdir)
     if not out.is_absolute():
         out = REPO_ROOT / out
     out.mkdir(parents=True, exist_ok=True)
+    # the env (dynamics, actuators, path constraints) is the one the policy was trained in;
+    # the FNPEG baseline flies the very same env (its reward terms are unused)
     env_kwargs = {**ep.env_kwargs_for(MODEL), "exact_terminal": True, "rate_saturation": True}
-    (out / "suite.json").write_text(json.dumps({"model": str(MODEL), "vn": str(VN), "env_kwargs": env_kwargs,
-                                                "nav_spec": NAV_SPEC, "combined": COMBINED.to_dict(),
-                                                "n_base": args.n_base}, indent=1))
+    guid = "fnpeg" if args.guidance == "fnpeg" else str(MODEL)
+    meta = {"guidance": args.guidance, "model": guid, "vn": str(VN), "env_kwargs": env_kwargs,
+            "nav_spec": NAV_SPEC, "combined": COMBINED.to_dict(), "n_base": args.n_base}
+    if args.guidance == "fnpeg":
+        from reentry_rl.guidance.fnpeg import FnpegConfig
+        meta["fnpeg_config"] = FnpegConfig().to_dict()
+    (out / "suite.json").write_text(json.dumps(meta, indent=1))
     t0 = time.time()
-    _log(f"suite start: {args.studies}")
-    if "jacobian" in args.studies:
+    _log(f"suite start ({args.guidance}): {args.studies}")
+    if "jacobian" in args.studies and args.guidance == "rl":
         study_jacobian(out, env_kwargs)
-    pool = Pool(args.workers, env_kwargs)
+    pool = Pool(args.workers, env_kwargs, model=guid)
     try:
         if "sensitivity" in args.studies:
             study_sensitivity(pool, out)
