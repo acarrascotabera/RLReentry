@@ -1477,7 +1477,7 @@ heat-rate floor (lift-up flight, the least peak any guidance can reach) is 0.982
 so the 1.4 % margin is a property of the entry conditions, not of the guidance; at most about 0.4 points
 can be gained nominally.
 
-### v29 — running (launched 2026-11-02 20:55): from v26 6M, bank actuator randomization, heat margin 5 %
+### v29 — done (2026-11-03): from v26 6M, bank actuator randomization, heat margin 5 %; not better, v26 6M stays
 
 v28 configuration (command in `results/stage2_v29/launch_cmd.json`; built from the v28-reference HPO
 trial 0) with:
@@ -1491,3 +1491,19 @@ trial 0) with:
 First iteration: 182 decisions/s (about 15 h), heat-rate charge active in 88 % of episodes, lam_Qdot 7461.
 To check after training: the bank gain/bias margin sweeps (stability.py margins) and the 300-case S4/S5 sets
 against v26 6M.
+
+Result. Validation (S2_val_robust_a5_L, v26 6M = 0.998): 1.213 (500k), 1.076 (1M), 1.18-1.28 (1.5-3.5M),
+1.07-1.11 (4-5.5M), best 1.034 at 6M (d_med 3.47 km, feasible 0.52), 1.08-1.20 to 10M (1.131 final).
+Same oscillation as v28 and never below v26 6M; feasibility fell from 0.61 to 0.45-0.59. The heat-rate
+charge did not converge: violation 0.77 at 2M, 0.95 at 2.5M, 0.91 at 10M with lam_Qdot at its 10000 cap.
+Charging at the floor asks for the least achievable peak in nearly every draw, which is infeasible once
+dispersions and the bank errors are on, so it competes with terminal accuracy throughout.
+
+Bank margins of the 1M best (stability.py margins, same 100-case base set; results/stability_v29_best1M/margins),
+median miss km (feasible) v26 6M -> v29 1M: baseline 1.79 (0.76) -> 1.81 (0.74); gain 0.85 80.0 -> 62.9;
+0.95 13.8 -> 11.0; 1.05 4.7 -> 5.3; 1.15 9.6 (0.74) -> 11.4 (0.46); bias -2 deg 8.5 (0.74) -> 8.2 (0.64);
+-1 deg 4.4 -> 3.3; +1 deg 2.2 -> 3.3; +2 deg 3.6 -> 5.2. No net gain: under-effective bank improves
+slightly, over-effective bank gets worse, and 5 % of gain still costs 5-11 km. This supports the reading
+that the bank sensitivity is structural (crossrange done late, little lateral authority left), not a
+training-coverage gap. Decision: v26 6M is the paper policy; v29 is not evaluated further. Its bank
+sensitivity is reported as a limitation with the measured tolerances.
