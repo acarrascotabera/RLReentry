@@ -135,6 +135,36 @@ def run(guidance, condition, n, workers, model=None, vn=None):
     return f
 
 
+SCALE_SETS = tuple(f"S5_scale_x{s:g}" for s in (0.1, 0.25, 0.5, 0.75, 1.0, 1.25))
+
+
+def run_scale(guidance, set_name, workers):
+    """One S5 robustness-vs-scale set (300 cases, as-designed physics) through the same
+    harness for both guidance laws -> results/final_mc/scale/<guidance>_<set>.csv."""
+    d = OUT / "scale"
+    d.mkdir(parents=True, exist_ok=True)
+    f = d / f"{guidance}_{set_name}.csv"
+    if f.exists():
+        return f
+    _n, scen, _l = load_set(ep.resolve_set(set_name))
+    labels = [{"case": i} for i in range(len(scen))]
+    env_kwargs = {**ep.env_kwargs_for(st.MODEL), "exact_terminal": True, "rate_saturation": True}
+    t0 = time.time()
+    pool = st.Pool(workers, env_kwargs, model="fnpeg" if guidance == "fnpeg" else st.MODEL, vn=st.VN)
+    try:
+        rows = [r for r, _ in pool.map(st._jobs(scen, labels, st.P0))]
+    finally:
+        pool.close()
+    df = pd.DataFrame(rows).sort_values("id")
+    df.to_csv(f, index=False)
+    s = summarize(df)
+    s.update({"guidance": guidance, "set": set_name, "wall_s": time.time() - t0})
+    (d / f"{guidance}_{set_name}_summary.json").write_text(json.dumps(s, indent=1))
+    st._log(f"final_mc/scale/{guidance}_{set_name}: d p50 {s['percentiles']['d_km']['p50']['value']:.3f} km, "
+            f"p95 {s['percentiles']['d_km']['p95']['value']:.2f}, feasible {s['rates']['feasible']['rate']:.3f}")
+    return f
+
+
 def tables():
     """Markdown comparison of every finished run (results/final_mc/final_mc_tables.md)."""
     runs = sorted(OUT.glob("*_summary.json"))
@@ -182,7 +212,15 @@ def main():
     ap.add_argument("--conditions", nargs="+", default=list(CONDITIONS), choices=list(CONDITIONS))
     ap.add_argument("--n", type=int, default=2000)
     ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--scale-sets", action="store_true",
+                    help="run the S5 robustness-vs-scale sets instead of the final MC set")
     args = ap.parse_args()
+    if args.scale_sets:
+        for s in SCALE_SETS:
+            for g in args.guidance:
+                run_scale(g, s, args.workers)
+        st._log("SCALE SETS DONE")
+        return
     build_set()
     for cond in args.conditions:
         for g in args.guidance:
