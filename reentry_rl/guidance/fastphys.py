@@ -220,6 +220,29 @@ def predict3d(x0, e_now, sig0, sigf, e_rev, kL, kD, h_tgt, E0, Ef, a_V, a_A,
     return 2, x, out[:k]
 
 
+@njit(cache=True)
+def pullout3d(x0, kL, kD, a_V, a_A, v_stop, t_max=1500.0):
+    """Lift-up flight (bank 0, reference AoA schedule) from x0 to the pull-out (gamma >= 0).
+    Returns the speed there [m/s], or 0 if the speed falls below v_stop [m/s] first (the
+    trajectory settles into equilibrium glide without a pull-out) or t_max runs out."""
+    x = x0.copy()
+    t = 0.0
+    while t < t_max:
+        if x[4] >= 0.0:
+            return x[3] * _VS
+        if x[3] * _VS < v_stop:
+            return 0.0
+        dt = 2.0 if alt_m(x[0], x[2]) > 50e3 else 1.0
+        a = _lin(x[3] * _VS, a_V, a_A)
+        k1 = eom6(x, 0.0, a, kL, kD)
+        k2 = eom6(x + 0.5 * dt * k1, 0.0, a, kL, kD)
+        k3 = eom6(x + 0.5 * dt * k2, 0.0, a, kL, kD)
+        k4 = eom6(x + dt * k3, 0.0, a, kL, kD)
+        x = x + (dt / 6.0) * (k1 + 2.0 * k2 + 2.0 * k3 + k4)
+        t += dt
+    return 0.0
+
+
 def _selftest():
     from ..physics.atmosphere import atmosphere
     from ..physics.geodesy import altitude_m

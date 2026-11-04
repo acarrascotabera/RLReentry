@@ -5,7 +5,10 @@ All phases run closed loop on the navigated state:
 
   phase 0  initial descent: bank 0 (full lift up) until the pull-out (gamma >= 0). This keeps
            the vehicle highest through the first heat pulse (the mission's heat-rate floor is
-           the peak of this lift-up flight).
+           the peak of this lift-up flight). Phase 0 is flown only while the onboard model
+           predicts that pull-out above v_pull (every corrector cycle): a shallow entry can
+           settle into equilibrium glide without one (the first versions then flew lift-up to
+           the handover: 0.8-3.1 Mm overshoot in 4 of 300 cases at 1.25x VISTA).
   phase 1  FNPEG (Lu, JGCD 2014) with a single bank reversal. The bank magnitude is linear
            in energy from sigma0 (now) to sigma_f (handover energy); the sign is left before
            the reversal energy e_r and right after it. Each corrector cycle, a numerical
@@ -66,6 +69,7 @@ def _wrap(a):
 
 @dataclass
 class FnpegConfig:
+    v_pull_mps: float = 6800.0      # phase 0 needs a (predicted) pull-out above this speed
     sigma_min_deg: float = 15.0     # least bank magnitude in phase 1 (lateral authority)
     dalpha_max_deg: float = 25.0    # AoA reduction from the reference schedule (range extension,
     alpha_lo_deg: float = 12.0      #   a 4th corrector parameter, not below alpha_lo), ramped in
@@ -125,6 +129,7 @@ class FnpegGuidance:
         self.kL = self.kD = 1.0
         self._t_prev = None
         self._t_solve = -1e9
+        self._t_pull, self._pull_ahead = -1e9, True
         self.x_path = np.inf                      # predicted ground path length to go [m]
         self.res = np.full(3, np.nan)
         self.term = None
@@ -269,6 +274,15 @@ class FnpegGuidance:
         self.res = r
         return r
 
+    def _pullout_ahead(self, z, t):
+        """Whether the lift-up descent is predicted to pull out (gamma >= 0) above v_pull;
+        re-evaluated every corrector cycle."""
+        if t - self._t_pull >= self.cfg.solve_dt_s:
+            self._t_pull = t
+            self._pull_ahead = fp.pullout3d(np.array(z[:6], dtype=float), self.kL, self.kD, self._aV,
+                                            self._aA, self.cfg.v_pull_mps) > 0.0
+        return self._pull_ahead
+
     def _check_reversal(self, e_now):
         if not self.reversed and e_now <= self.p[2]:
             self.reversed = True
@@ -284,7 +298,10 @@ class FnpegGuidance:
         alpha_now = float(np.rad2deg(z[7]))
         V = z[3] * C.V_SCALE
         n_lim = (1.0 - cfg.n_margin) * C.N_MAX
-        if self.phase == 0 and z[4] >= 0.0:
+        if self.phase == 0 and (z[4] >= 0.0 or V < cfg.v_pull_mps or not self._pullout_ahead(z, t)):
+            # a shallow entry can settle into equilibrium glide without a pull-out (gamma stays
+            # a few tenths of a degree negative): phase 0 is flown only while the onboard model
+            # predicts a pull-out within the heat-pulse segment of the AoA schedule
             self.phase = 1
         if self.phase == 1 and self.x_path < cfg.x_term_km * 1e3:
             self._start_terminal(env, z)

@@ -1636,6 +1636,22 @@ position, FPA and altitude only), the slow cases arrive steep (the 14 worst FPA 
 r = 0.89; case 452: 1078 m/s, qbar 1.28 x limit). Load factor > limit in 2.5 % of HIFI cases
 (RL 0.9 %). Which HIFI component causes the spread: FNPEG margins study (campaign2 step 3).
 
+FNPEG S5 scale sets (campaign2 step 2, 14:26-15:55): median miss 2-5 m at every scale, p95 <= 60 m,
+strictly feasible 0.857 / 0.637 / 0.560 / 0.490 / 0.450 / 0.397 (RL 0.803 / 0.597 / 0.523 / 0.430 /
+0.370 / 0.333). But 1.25x had 4 misses of 0.76-3.1 Mm with no bank reversal: shallow entries
+(FPA +0.27..+0.35 deg, start 10-15 km low) settle into equilibrium glide with gamma -0.1..-0.6 deg
+and never pull out, so the phase-0 trigger (gamma >= 0) never fired and the vehicle flew lift-up
+to the handover. A plain speed fallback (leave phase 0 below 6800 m/s) came too late (case 283:
+1.3 Mm, 85 deg bank could not absorb the range) and no fixed speed separates these cases from
+normal pull-outs (7090-7500 m/s). Fix (fnpeg.py, fastphys.pullout3d): phase 0 is flown only while
+the onboard model predicts a pull-out above v_pull = 6800 m/s (lift-up flight on the reference AoA,
+every corrector cycle); the four cases now miss by 1.6-6 m, and the switch time is unchanged in
+the other 296 cases of the 1.25x set. One more 1.25x failure (case 235, 1.1 Mm, heading error
+163 deg; RL 650 km) is not fixed: an over-energy entry (density factor 0.66) whose normal pull-out
+at 7.5 km/s leaves more range than 85 deg of bank can absorb; without phase 0 FNPEG reaches it
+(1.4 m) at 1.45x the heat-rate limit. The FNPEG suite started at 15:55 was stopped (16:01) and,
+with the scale sets, is re-run with the fix (campaign3.ps1).
+
 New margin conditions of v26 6M (101-case base set; median / p90 / max miss km, strictly feasible):
 attitude acceleration 20 / 10 / 5 / 2 deg/s2: 1.68 / 1.72 / 1.74 / 1.67 median, p90 3.1-3.3,
 feasible 0.76 throughout (insensitive); bank gain 0.97: 7.6 / 10.5 / 15.1, gain 1.03: 3.2 / 4.6 /
