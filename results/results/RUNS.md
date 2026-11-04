@@ -1618,6 +1618,24 @@ campaign2.ps1 re-runs the FNPEG final MC with the fix, then the S5 scale sets fo
 then the FNPEG stability suite (stopped at the start of campaign.ps1 step 3 so the final MC goes
 first). The RL rows above stand.
 
+Corrected FNPEG (campaign2, 2026-11-04 09:53-14:26; final_mc_tables.md):
+| | FNPEG ideal | FNPEG HIFI | RL ideal | RL HIFI |
+|---|---|---|---|---|
+| miss p50 / p95 / p99.73 / max [km] | 0.002 / 0.006 / 0.027 / 0.080 | 1.59 / 4.7 / 8.5 / 34 | 2.48 / 6.0 / 8.2 / 58 | 3.83 / 10.5 / 20.3 / 123 |
+| abs FPA error p50 / p95 / p99.73 [deg] | 0.02 / 0.06 / 0.10 | 0.97 / 3.5 / 14.0 | 1.17 / 9.4 / 12.7 | 4.27 / 12.5 / 16.1 |
+| abs heading error p50 / p95 [deg] | 0.07 / 0.16 | 1.6 / 5.3 | 5.1 / 12.3 | 9.3 / 20.6 |
+| strictly feasible [95 % CI] | 69.9 % [67.8, 71.9] | 58.0 % [55.8, 60.1] | 65.7 % [63.6, 67.8] | 54.5 % [52.3, 56.7] |
+| peak load factor / limit p99.73 / max | 0.55 / 0.59 | 1.09 / 1.15 | 0.85 / 0.88 | 1.03 / 1.07 |
+| peak dyn. pressure / limit p99.73 / max | 0.57 / 1.09 | 0.84 / 1.28 | 0.29 / 0.34 | 0.42 / 0.45 |
+| handover speed p1 / p50 / p99 [m/s] | 485 / 512 / 546 | 291 / 678 / 828 | 323 / 395 / 489 | 309 / 404 / 585 |
+| heat load / SCvx optimum p50 | 1.111 | 1.110 | 1.207 | 1.210 |
+FNPEG is the more accurate law in both conditions. Its HIFI weakness is energy at the handover:
+the speed spreads from +-30 to 290-830 m/s (no velocity target; the terminal phase steers
+position, FPA and altitude only), the slow cases arrive steep (the 14 worst FPA errors, -10 to
+-18 deg, all have V_f < 310 m/s) and the fast ones low and dense (dynamic pressure tracks V_f,
+r = 0.89; case 452: 1078 m/s, qbar 1.28 x limit). Load factor > limit in 2.5 % of HIFI cases
+(RL 0.9 %). Which HIFI component causes the spread: FNPEG margins study (campaign2 step 3).
+
 New margin conditions of v26 6M (101-case base set; median / p90 / max miss km, strictly feasible):
 attitude acceleration 20 / 10 / 5 / 2 deg/s2: 1.68 / 1.72 / 1.74 / 1.67 median, p90 3.1-3.3,
 feasible 0.76 throughout (insensitive); bank gain 0.97: 7.6 / 10.5 / 15.1, gain 1.03: 3.2 / 4.6 /
