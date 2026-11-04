@@ -16,8 +16,10 @@ All phases run closed loop on the navigated state:
            least-squares sense. Corrector steps are under-relaxed (x0.5), which averages the
            cycle-to-cycle effect of navigation noise on the reversal timing.
            Range extension: a fourth parameter reduces the AoA from the reference schedule
-           below the heat pulse (higher L/D); a small preference residual keeps it at zero
-           unless the bank alone cannot null the predicted errors.
+           below the heat pulse (higher L/D). It engages only once the bank magnitude is at its
+           floor; a small preference residual then returns it to zero when the bank alone can
+           null the predicted errors again. The LM damping is Marquardt-scaled (the parameters
+           have different units) and a parameter held at a bound leaves the step.
            Constraint enforcement: the bank magnitude is bounded by quasi-equilibrium glide
            at the heat-rate / load-factor / dynamic-pressure boundary; the AoA by the
            load-factor limit.
@@ -221,6 +223,13 @@ class FnpegGuidance:
         hi = np.array([C.BANK_MAX, C.BANK_MAX, e_now, cfg.dalpha_max_deg, e_now, e_now])
         p = np.clip(self.p, lo, hi)
         p[5] = min(p[5], p[4])
+        if not self.reversed and p[3] <= 0.0 and p[0] > lo[0]:
+            # Before the reversal (4 parameters, 3 residuals) the AoA reduction engages only
+            # with the bank magnitude at its floor (range extension): free, it drifted along the
+            # weakly determined bank/AoA trade, and a level preference strong enough to stop that
+            # pulled it back to zero late in low-L/D flights. After the reversal it is the third
+            # degree of freedom beside the two bank magnitudes, and always free.
+            free = [j for j in free if j != 3]
         st, xf, tr = self._predict(x0, e_now, p, env.tgt_alt, rec=10)
         r = self._residual(env, st, xf, p)
         if len(tr) > 1:                           # predicted ground path length to go
@@ -238,9 +247,19 @@ class FnpegGuidance:
                 continue
             sq, xq, _ = self._predict(x0, e_now, q, env.tgt_alt)
             J[:, k] = (self._residual(env, sq, xq, q) - r) / (q[j] - p[j])
-        A = J.T @ J
-        A += cfg.lm_mu * max(np.trace(A), 1e-12) / len(free) * np.eye(len(free))
-        dp = np.linalg.solve(A, -J.T @ r)
+        # Parameters at a bound that the descent direction pushes further out are held, and the
+        # LM damping is Marquardt-scaled (diag of J'J): the columns have different units (rad,
+        # energy, deg), and an identity damping scaled by the trace (the bank columns) crushed
+        # the AoA-reduction step, so low-L/D cases ran out of range (2026-11-04).
+        g = J.T @ r
+        act = [k for k, j in enumerate(free)
+               if np.any(J[:, k]) and not ((p[j] <= lo[j] and g[k] > 0.0) or (p[j] >= hi[j] and g[k] < 0.0))]
+        dp = np.zeros(len(free))
+        if act:
+            Ja = J[:, act]
+            A = Ja.T @ Ja
+            A += cfg.lm_mu * np.diag(np.diag(A))
+            dp[act] = np.linalg.solve(A, -Ja.T @ r)
         lim = np.array([10.0 * _DEG, 10.0 * _DEG, 0.05, 5.0, 0.05, 0.05])[free]
         dp = np.clip(cfg.step_relax * dp, -lim, lim)
         p[free] = p[free] + dp

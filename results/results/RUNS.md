@@ -1520,7 +1520,9 @@ dispersions, perturbations and random draws as the policy. Final design (commit 
   (sigma0, sigma_f, e_r, dalpha) against a numba 3-DOF predictor (onboard model x filtered
   sensed/model L and D ratios) nulls the predicted north/east/heading error at 25 km; after the
   reversal (sigma0, sigma_f, dalpha). dalpha reduces the AoA below the heat pulse (range
-  extension, small preference residual). QEGC bank bound at the heat-rate / n / qbar boundary;
+  extension, small preference residual; before the reversal engaged only with the bank at its
+  floor; Marquardt-scaled LM, bound-aware step: fix of 2026-11-04, see Final Monte Carlo).
+  QEGC bank bound at the heat-rate / n / qbar boundary;
   load-factor AoA limit.
 - phase 2 (last 150 km of the predicted path): 3-D path following of the last prediction with
   curvature feedforward and end blends into the target heading/FPA/altitude, shrinking to the
@@ -1577,6 +1579,50 @@ network evaluation vs ~2500 3-DOF predictions per flight), and its behaviour at 
 dispersions (to be measured: S4/S5 scale curves for FNPEG). The paper's claim must be framed
 accordingly.
 
-### Final Monte Carlo (running): results/final_mc/campaign.ps1
+### Final Monte Carlo: results/final_mc/campaign.ps1, campaign2.ps1
 S6_mc_x0.1_a5 (2000 cases: ic/tc/mass/k_rho at 0.1x VISTA, C_L/C_D 1-sigma 5 %); rl and fnpeg,
 ideal and HIFI; then the new margin conditions of v26 and the full FNPEG stability suite.
+
+First run (2026-11-04 01:33-07:46; FNPEG part kept in results/final_mc/superseded_fnpeg_v1/):
+| | RL ideal | RL HIFI | FNPEG v1 ideal | FNPEG v1 HIFI |
+|---|---|---|---|---|
+| miss p50 / p95 / p99.73 / max [km] | 2.48 / 6.0 / 8.2 / 58 | 3.83 / 10.5 / 20.3 / 123 | 0.003 / 0.02 / 205 / 287 | 1.67 / 6.4 / 229 / 307 |
+| abs FPA error p50 / p95 [deg] | 1.17 / 9.4 | 4.27 / 12.5 | 0.02 / 0.07 | 1.01 / 10.1 |
+| abs heading error p50 / p95 [deg] | 5.1 / 12.3 | 9.3 / 20.6 | 0.08 / 0.18 | 1.67 / 7.8 |
+| strictly feasible [95 % CI] | 65.7 % [63.6, 67.8] | 54.5 % [52.3, 56.7] | 69.9 % [67.8, 71.9] | 58.0 % [55.8, 60.2] |
+| feasible vs heat-rate floor | 67.2 % | 57.2 % | 71.0 % | 67.8 % |
+| heat load / SCvx optimum p50 | 1.207 | 1.210 | 1.109 | 1.109 |
+FNPEG v1 tail: 70 of 2000 ideal cases missed by > 10 km, all at L/D factor (k_CL/k_CD) < 0.88
+(68 of the 137 cases there, 24 of 25 below 0.85) plus 2 at L/D > 1.27; the policy reached all of
+those within 6 km but one (58 km, L/D 0.75). Cause, an FNPEG implementation bug, not a limit of the
+method: the LM damping was the identity scaled by trace(J'J)/n, dominated by the bank columns
+(km/rad), which crushed the dalpha step (deg) to ~0.05 deg per cycle; at low L/D the predicted
+shortfall (350-1200 km) stayed unresolved while the AoA reduction crept to 6 of its 25 deg.
+Fix (fnpeg.py, regression on the same cases and seeds, scratchpad regress.py):
+- Marquardt scaling (mu diag(J'J)); a parameter held at a bound by the descent direction leaves
+  the step. Low-L/D 80 cases: p50 98 -> 0.005 km, max 287 -> 0.64 km. But the free dalpha then
+  drifted along the weakly determined bank/AoA trade before the reversal (4 parameters, 3
+  residuals): nominal alpha_min -1.3 deg, strictly feasible 0.717 -> 0.658, J 1.111 -> 1.148.
+- preference weight 0.1 -> 2 km/deg: nominal restored, but late in low-L/D flights the level
+  preference pulls dalpha back to zero (its range effect shrinks with the flight left): 22 of
+  40 > 10 km (energy-deficient terminal reference, AoA saturates, vehicle sinks).
+- dalpha gated on the bank floor in every phase: nominal exact, but HIFI max 22 km: after the
+  reversal dalpha is the third degree of freedom beside the two bank magnitudes (north, east,
+  heading); the old crushed step had used ~1 deg of it.
+- final: dalpha gated on the bank floor before the reversal only, preference 0.1 km/deg.
+  low L/D (40): p50 0.005, max 0.07 km (v1 93 / 287); nominal (60): p50 0.002, max 0.01 km,
+  feasible 0.683, J 1.111 (v1 0.003 / 0.02, 0.683, 1.111); HIFI (60): p50 / p90 / max 2.00 /
+  4.05 / 6.43 km, FPA 1.09 deg, feasible 0.483, n max 0.98 (v1 1.94 / 4.39 / 127, 1.01, 0.483,
+  1.01). One extreme case (452, L/D 0.75) now reaches (0.003 km) at Qdot 1.205 (floor 1.065).
+campaign2.ps1 re-runs the FNPEG final MC with the fix, then the S5 scale sets for both laws,
+then the FNPEG stability suite (stopped at the start of campaign.ps1 step 3 so the final MC goes
+first). The RL rows above stand.
+
+New margin conditions of v26 6M (101-case base set; median / p90 / max miss km, strictly feasible):
+attitude acceleration 20 / 10 / 5 / 2 deg/s2: 1.68 / 1.72 / 1.74 / 1.67 median, p90 3.1-3.3,
+feasible 0.76 throughout (insensitive); bank gain 0.97: 7.6 / 10.5 / 15.1, gain 1.03: 3.2 / 4.6 /
+5.5 with FPA error 10 deg (the policy is very sensitive to a +-3 % bank scale error); bias -0.5 /
+-0.25 / +0.25 / +0.5 deg: 2.7 / 2.0 / 1.6 / 1.7 median; density GM x0.5 / 1 / 2: 1.8 / 1.9 / 2.3
+median, feasible 0.75 / 0.64 / 0.43 (heat rate); wind x0.5 / 1 / 2: 1.8 / 2.2 / 2.9, feasible
+0.76 / 0.78 / 0.71; navigation drift (1 % accelerometer scale) x1 / 2 / 4: 4.2 / 12 / 20, 7.7 /
+25 / 47, 17 / 58 / 112, n max 1.01 / 1.36 / 1.73; HIFI stack 3.7 / 8.2 / 14.0, feasible 0.64.
