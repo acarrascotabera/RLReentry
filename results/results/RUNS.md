@@ -1652,6 +1652,25 @@ at 7.5 km/s leaves more range than 85 deg of bank can absorb; without phase 0 FN
 (1.4 m) at 1.45x the heat-rate limit. The FNPEG suite started at 15:55 was stopped (16:01) and,
 with the scale sets, is re-run with the fix (campaign3.ps1).
 
+campaign3 (2026-11-04 16:11-18:46, scale sets; scale_tables.md, figures/fig_scale.png): the fix
+changed only the four 1.25x cases (now 2-6 m); every other case of the six sets is unchanged
+(1x: case 283 by < 1 m). Old files in scale/superseded_phase0/.
+| scale | 0.1 | 0.25 | 0.5 | 0.75 | 1 | 1.25 |
+|---|---|---|---|---|---|---|
+| FNPEG miss p50 / p95 [m] | 2.2 / 4.2 | 2.4 / 6.0 | 3.2 / 8.0 | 3.7 / 11 | 4.5 / 14 | 4.6 / 25 |
+| RL miss p50 / p95 [km] | 1.69 / 3.7 | 2.7 / 7.4 | 4.0 / 14.7 | 5.5 / 25.6 | 7.9 / 40 | 11.5 / 62 |
+| FNPEG strictly / attributably feasible | 0.857 / 0.870 | 0.637 / 0.653 | 0.560 / 0.563 | 0.490 / 0.497 | 0.453 / 0.460 | 0.397 / 0.403 |
+| RL strictly / attributably feasible | 0.803 / 0.830 | 0.597 / 0.613 | 0.523 / 0.527 | 0.430 / 0.437 | 0.370 / 0.377 | 0.333 / 0.337 |
+| physical ceiling (heat-rate floor <= 1) | 0.883 | 0.670 | 0.593 | 0.530 | 0.497 | 0.477 |
+FNPEG max miss 9.0 km at 1x and 1.1 Mm at 1.25x (case 235, above). Its km-level misses at 1-1.25x
+(cases 164, 251, 83: 8-30 km) are energy-short arrivals (V_f 150-220 m/s); RL reaches 251 and 83
+within 2.1 km, 164 within 17-21 km. On the as-designed models FNPEG beats RL in accuracy (x1000)
+and in feasibility (+3 to +8 points) at every scale.
+Phase-0 scan of the S6 final MC (2 x 2000 cases, old vs new rule, scratchpad scan_phase0.py): the
+switch time is identical in every case (lowest switch speed 7065 / 7024 m/s ideal / HIFI), so the
+corrected FNPEG final MC above stands; campaign3 ran without -FinalMC. Then the FNPEG stability
+suite (results/stability_fnpeg, from 18:46).
+
 New margin conditions of v26 6M (101-case base set; median / p90 / max miss km, strictly feasible):
 attitude acceleration 20 / 10 / 5 / 2 deg/s2: 1.68 / 1.72 / 1.74 / 1.67 median, p90 3.1-3.3,
 feasible 0.76 throughout (insensitive); bank gain 0.97: 7.6 / 10.5 / 15.1, gain 1.03: 3.2 / 4.6 /
