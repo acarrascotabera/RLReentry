@@ -1507,3 +1507,76 @@ slightly, over-effective bank gets worse, and 5 % of gain still costs 5-11 km. T
 that the bank sensitivity is structural (crossrange done late, little lateral authority left), not a
 training-coverage gap. Decision: v26 6M is the paper policy; v29 is not evaluated further. Its bank
 sensitivity is reported as a limitation with the measured tolerances.
+
+## FNPEG baseline, higher-fidelity models, final Monte Carlo (2026-11-03 / 04)
+
+### FNPEG baseline (reentry_rl/guidance; flies the policy's env via stability.py --guidance fnpeg)
+
+Classical comparison guidance, run closed loop on the navigated state with the same env,
+dispersions, perturbations and random draws as the policy. Final design (commit 7cbb2a2):
+- phase 0: bank 0 to the pull-out (gamma >= 0): the heat pulse is flown lift-up (floor 0.982).
+- phase 1: FNPEG (Lu 2014) with one bank reversal: |sigma| linear in energy (sigma0 -> sigma_f),
+  left before e_r, right after; every 2 s a damped, under-relaxed (x0.5) Gauss-Newton step on
+  (sigma0, sigma_f, e_r, dalpha) against a numba 3-DOF predictor (onboard model x filtered
+  sensed/model L and D ratios) nulls the predicted north/east/heading error at 25 km; after the
+  reversal (sigma0, sigma_f, dalpha). dalpha reduces the AoA below the heat pulse (range
+  extension, small preference residual). QEGC bank bound at the heat-rate / n / qbar boundary;
+  load-factor AoA limit.
+- phase 2 (last 150 km of the predicted path): 3-D path following of the last prediction with
+  curvature feedforward and end blends into the target heading/FPA/altitude, shrinking to the
+  impact-angle law (lengths x/sqrt6), gains saturated at 8 km, command held over the last 2 km.
+- AoA schedule and initial guess from an offline single-reversal design on the nominal
+  (guidance/design_reference.py): SCvx AoA minus 5 deg below the heat pulse for control margin
+  (at the SCvx AoA, ~40 deg, the nominal sits at the range limit: 19 deg of bank, no margin).
+  Reference heat load 1.184e9 J/m2 (1.104 x SCvx optimum; v26 6M ~1.21).
+Design history (each found on dispersed cases): (1) SCvx ground track as lateral reference with a
+heading-corridor / bang-bang track-following reversal logic: the SCvx S-bend at 3-4 km/s needs
+~1.5 g of lift, dispersed vehicles drift 50-250 km off track; (2) aim-point corridor: same; (3)
+offline-designed single-reversal track: still unfollowable when range control lowers the bank
+(sign-only lateral control: turn rate set by the range magnitude); (4) online single reversal
+(final): nominal exact; a bank-floor/AoA mapping of the range variable re-anchored the profile
+every cycle (flown bank != predicted): 115-167 km misses at 5 % aero -> separate dalpha
+parameter; white navigation noise: reversal timing chased noise (p90 14.5 km) -> under-
+relaxation (p90 5.4 km); terminal 1/x^2 gains turned 300 m altitude noise into +-85 deg bank
+flips and n up to 1.12 -> gain floor 8 km + 2 km hold + 6 % n margin (p90 2.9 km, n>1 10 %);
+corrective S-turn window after the reversal chattered (64 reversals) and cost nominal accuracy:
+implemented, off. Remaining limitation: a 1 % accelerometer scale error drifting (Gauss-Markov)
+biases the L/D filter and the predicted range late in flight, where one reversal leaves no
+lateral authority: 43 km in 1 of 41 cases; 2.2 km at 300 ppm (navigation grade).
+
+### Higher-fidelity models (stability.py, evaluation only)
+GRAM-like Gauss-Markov density (8 km correlation, 1-sigma 1 % at 0 km to 10 % above 100 km);
+winds (60 m/s westerly jet at 60 km x N(1, 0.5) + 15 m/s Gauss-Markov, air-relative aero and
+heating, air-relative sensed accelerations); bank/AoA acceleration limits; Gauss-Markov
+navigation drift (200 s); accelerometer-only scale on NAV_SPEC; heat-rate floor flown through
+the same disturbed atmosphere. With all of them off the env reproduces the earlier v26 results
+bit for bit. HIFI stack (final MC): nav at spec as bias + 200 s drift with 300 ppm accelerometer
+scale, 0.5 s delay, 0.5 s lag, 20 deg/s bank rate, 5 deg/s2 bank and AoA acceleration, rho_gm 1,
+wind 1.
+
+### First comparison (101-case stability base set = nominal + 100 of S4 0.1x, 2 % aero)
+| | FNPEG | RL v26 6M |
+|---|---|---|
+| miss median / p90 / max [km] | 0.000 / 0.001 / 0.05 | 1.79 / 3.31 / 5.79 |
+| abs FPA error median / p90 [deg] | 0.03 / 0.07 | 1.55 / 5.39 |
+| abs heading error median / p90 [deg] | 0.13 / 0.23 | 3.94 / 11.3 |
+| strictly feasible | 0.82 | 0.76 |
+| success rel_1pct | 0.74 | 0.00 |
+| heat load / SCvx optimum | 1.10 | 1.21 |
+| reversals | 2 | 4 |
+Nominal, one hi-fi model at a time (miss km, FPA error deg): rho_gm FNPEG 0.000 / RL 1.49 (both
+Qdot 1.02); wind 0.000 / 2.48; 5 deg/s2 attitude acceleration FNPEG 3.72 km and -10.3 deg (its
+terminal phase needs a fast attitude loop) / RL 1.55 km, -1.4 deg; nav drift FNPEG 0.85 / RL 5.85.
+41-case subset: nav_x1 (white) FNPEG 1.28 / 2.9 km median / p90, FPA 1.5 deg, heading 2.6 deg,
+feasible 0.76 vs RL 3.27 / 5.5 km, 2.2 deg, 8.0 deg, 0.78; HIFI FNPEG 1.47 / 3.3 km, 0.9 deg,
+1.8 deg, feasible 0.71 vs RL 4.30 / 8.2 km, 6.1 deg, 9.5 deg, 0.68.
+Reading: at realistic dispersions a well-built numerical predictor-corrector is markedly more
+accurate than the policy, also under the hi-fi models; the policy's advantages are insensitivity
+to the attitude-loop bandwidth and to accelerometer errors, a fixed and tiny onboard cost (one
+network evaluation vs ~2500 3-DOF predictions per flight), and its behaviour at large
+dispersions (to be measured: S4/S5 scale curves for FNPEG). The paper's claim must be framed
+accordingly.
+
+### Final Monte Carlo (running): results/final_mc/campaign.ps1
+S6_mc_x0.1_a5 (2000 cases: ic/tc/mass/k_rho at 0.1x VISTA, C_L/C_D 1-sigma 5 %); rl and fnpeg,
+ideal and HIFI; then the new margin conditions of v26 and the full FNPEG stability suite.
