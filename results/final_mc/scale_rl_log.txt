@@ -1,0 +1,7 @@
+[09:58:12] final_mc/scale/rl_S5_scale_x0.1: d p50 1.691 km, p95 3.70, feasible 0.803
+[10:23:38] final_mc/scale/rl_S5_scale_x0.25: d p50 2.699 km, p95 7.38, feasible 0.597
+[10:50:39] final_mc/scale/rl_S5_scale_x0.5: d p50 3.997 km, p95 14.66, feasible 0.523
+[11:15:34] final_mc/scale/rl_S5_scale_x0.75: d p50 5.531 km, p95 25.59, feasible 0.430
+[11:41:58] final_mc/scale/rl_S5_scale_x1: d p50 7.934 km, p95 40.24, feasible 0.370
+[12:08:16] final_mc/scale/rl_S5_scale_x1.25: d p50 11.540 km, p95 62.31, feasible 0.333
+[12:08:16] SCALE SETS DONE
