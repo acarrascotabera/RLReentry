@@ -162,13 +162,13 @@ def eom6(x, sig, a_deg, kL, kD):
 
 @njit(cache=True)
 def predict3d(x0, e_now, sig0, sigf, e_rev, kL, kD, h_tgt, E0, Ef, a_V, a_A,
-              dalpha, v_hi, v_lo, a_lo, rec, t_max=4000.0):
+              dalpha, v_hi, v_lo, a_lo, rec, e_wa=-1.0, e_wb=-1.0, t_max=4000.0):
     """Full 3-DOF prediction from x0 = [r, lon, lat, V, gamma, psi] with the FNPEG bank
-    profile |sigma|(e) linear from sig0 (e_now) to sigf (e = 0), sign -1 (left) for
-    e > e_rev and +1 (right) after, and the AoA schedule alpha_cmd(V, dalpha), to the
-    altitude h_tgt. Returns (status, x_f) with status 0 = reached, 1 = skip-out, 2 = slow /
-    timeout; with rec > 0 the samples (t, r, lon, lat, V, gamma, psi, h) every rec steps
-    are returned as the third value."""
+    profile |sigma|(e) linear from sig0 (e_now) to sigf (e = 0); sign -1 (left) for
+    e > e_rev, +1 (right) after, except -1 again in the corrective window e_wb < e <= e_wa;
+    AoA schedule alpha_cmd(V, dalpha); to the altitude h_tgt. Returns (status, x_f) with
+    status 0 = reached, 1 = skip-out, 2 = slow / timeout; with rec > 0 the samples
+    (t, r, lon, lat, V, gamma, psi, h) every rec steps are returned as the third value."""
     x = x0.copy()
     t = 0.0
     h = alt_m(x[0], x[2])
@@ -189,7 +189,7 @@ def predict3d(x0, e_now, sig0, sigf, e_rev, kL, kD, h_tgt, E0, Ef, a_V, a_A,
         mag = sigf if e <= 0.0 else sig0 + (sigf - sig0) * (e_now - e) / de
         if e > e_now:
             mag = sig0
-        sg = -mag if e > e_rev else mag
+        sg = -mag if (e > e_rev or (e_wb < e <= e_wa)) else mag
         a = alpha_cmd(x[3] * _VS, dalpha, a_V, a_A, v_hi, v_lo, a_lo)
         k1 = eom6(x, sg, a, kL, kD)
         k2 = eom6(x + 0.5 * dt * k1, sg, a, kL, kD)

@@ -22,6 +22,22 @@ perturbation class at a time, swept in magnitude, so each curve isolates one mar
            sinusoidal waves (amplitude A, wavelength 10 km, random phase per case)
            and a Gaussian bump around 55 km
 
+higher-fidelity models (added 2026-11-03; evaluation only, no guidance law models them):
+
+  rho_gm   GRAM-like correlated density: relative perturbation, Gauss-Markov in altitude
+           (8 km correlation), 1-sigma growing from 1 % at sea level to 10 % above 100 km
+  wind     horizontal winds: a westerly jet (60 m/s peak at 60 km, per-case amplitude
+           ~ N(1, 0.5)) plus Gauss-Markov components (15 m/s, 5 km correlation) on both
+           axes; aerodynamic forces, heat rate and dynamic pressure use the air-relative
+           velocity, and the sensed accelerations are air-relative too
+  acc      bank and AoA acceleration limits (second-order attitude response)
+  nav_gm   navigation errors as a per-episode bias plus Gauss-Markov drift (200 s) instead
+           of white noise
+  hifi     the stack used by the final Monte Carlo (HIFI below)
+
+With density or wind models on, the heat-rate floor (qdot_lb) is flown through the same
+disturbed atmosphere, so it stays the least peak any guidance can reach.
+
 plus deterministic studies on the nominal mission:
 
   sensitivity  closed- vs open-loop terminal sensitivity to small initial-state and
@@ -80,6 +96,21 @@ _DEG = np.pi / 180.0
 # per-episode bias and as per-decision white noise
 NAV_SPEC = dict(pos_m=300.0, vel_mps=1.0, fpa_deg=0.05, psi_deg=0.05, acc_frac=0.01)
 
+# Higher-fidelity disturbance models (evaluation only; neither guidance law models them).
+# Density: altitude-correlated relative perturbation, first-order Gauss-Markov in altitude
+# (correlation length rho_gm_corr_m) with a 1-sigma that grows with altitude, of the order
+# of Earth-GRAM high-latitude dispersions (a few % in the stratosphere, ~10 % in the
+# mesosphere / lower thermosphere); multiplies the scenario's k_rho bias.
+RHO_GM_ALT_KM = (0.0, 20.0, 40.0, 60.0, 80.0, 100.0, 130.0)
+RHO_GM_SIGMA = (0.01, 0.02, 0.03, 0.05, 0.08, 0.10, 0.10)
+# Winds: horizontal, altitude-dependent. Zonal: a westerly jet (polar winter stratosphere /
+# mesosphere) of peak WIND_JET_MPS at WIND_JET_ALT_M (Gaussian, WIND_JET_WIDTH_M) with a
+# per-case amplitude factor ~ N(1, 0.5), plus Gauss-Markov components (1-sigma WIND_GM_MPS,
+# correlation length wind_corr_m) on both axes.
+WIND_JET_MPS, WIND_JET_ALT_M, WIND_JET_WIDTH_M, WIND_GM_MPS = 60.0, 60e3, 20e3, 15.0
+_GRID_DH = 250.0                    # altitude grid of the generated profiles [m]
+_GRID_H = np.arange(0.0, 130e3 + _GRID_DH, _GRID_DH)
+
 
 @dataclass(frozen=True)
 class Perturbation:
@@ -95,6 +126,15 @@ class Perturbation:
     rho_bump_amp: float = 0.0       # Gaussian density bump: amplitude (fraction)
     rho_bump_alt_m: float = 55e3
     rho_bump_width_m: float = 5e3
+    rho_gm: float = 0.0             # GRAM-like correlated density perturbation (multiple of
+    rho_gm_corr_m: float = 8e3      #   RHO_GM_SIGMA) and its altitude correlation length
+    wind_level: float = 0.0         # multiple of the wind model (jet + Gauss-Markov)
+    wind_corr_m: float = 5e3
+    bank_acc_dps2: float = 0.0      # attitude acceleration limits (0 = none): second-order
+    alpha_acc_dps2: float = 0.0     #   response of the attitude loop to rate commands
+    nav_tau_s: float = 0.0          # 0: white navigation noise; > 0: Gauss-Markov drift with
+                                    #   this correlation time (same 1-sigma)
+    nav_acc_scale: float = 1.0      # multiplier on the accelerometer term of NAV_SPEC only
 
     def to_dict(self):
         d = asdict(self)
@@ -106,6 +146,53 @@ class Perturbation:
         d = dict(d)
         d["impulses"] = tuple(tuple(i) for i in d.get("impulses", ()))
         return cls(**d)
+
+
+def _gauss_markov(rng, n, phi):
+    """Stationary unit-variance AR(1) sequence of length n with lag-1 correlation phi."""
+    w = rng.standard_normal(n)
+    x = np.empty(n)
+    x[0] = w[0]
+    s = np.sqrt(1.0 - phi * phi)
+    for k in range(1, n):
+        x[k] = phi * x[k - 1] + s * w[k]
+    return x
+
+
+def _rhs_wind(z, sigma, alpha_deg, model, we, wn):
+    """3-DOF translational rates with a horizontal wind (we east, wn north, m/s): the aero
+    forces act on the AIR-relative velocity (drag along it, lift normal to it and banked
+    about it), projected on the planet-relative (V, gamma, psi) frame. Reduces exactly to
+    eom_3dof.translational_rhs for zero wind."""
+    from reentry_rl.physics.aero_wb001 import lift_drag_nd
+    from reentry_rl.physics.gravity_j2 import gravity_j2
+    r, lon, lat, V, gam, psi = z[0], z[1], z[2], z[3], z[4], z[5]
+    sG, cG, sP, cP = np.sin(gam), np.cos(gam), np.sin(psi), np.cos(psi)
+    u_v = np.array([cG * sP, cG * cP, sG])                    # (east, north, up)
+    va = V * u_v - np.array([we, wn, 0.0]) / C.V_SCALE
+    Va = float(np.linalg.norm(va))
+    u_a = va / Va
+    up = np.array([0.0, 0.0, 1.0])
+    l0 = up - u_a[2] * u_a
+    l0 /= np.linalg.norm(l0)
+    side = np.cross(u_a, l0)                                  # right of the air path
+    L, D, _rho, _CL, _CD = lift_drag_nd(r, lat, Va, alpha_deg, model)
+    a = -D * u_a + L * (np.cos(sigma) * l0 + np.sin(sigma) * side)
+    e_g = np.array([-sG * sP, -sG * cP, cG])
+    e_p = np.array([cP, -sP, 0.0])
+    D_eff, Lv, Lh = -float(a @ u_v), float(a @ e_g), float(a @ e_p)
+    gR, gD = gravity_j2(r, lat)
+    s, Om = C.RATE_SCALE, C.OMEGA
+    sL, cL = np.sin(lat), np.cos(lat)
+    return np.array([
+        s * V * sG,
+        s * V * cG * sP / (r * cL),
+        s * V * cG * cP / r,
+        s * (-D_eff + gR * sG + gD * sP * cG + Om ** 2 * r * cL * (sG * cL - cG * sL * cP)),
+        s * (Lv / V + V * cG / r + gR * cG / V - gD * sP * sG / V + 2.0 * Om * cL * sP
+             + Om ** 2 * r * cL * (cG * cL + sG * sL * cP) / V),
+        s * (Lh / (V * cG) + V * cG * sP * np.tan(lat) / r - gD * sP / (V * cL)
+             - 2.0 * Om * (np.tan(gam) * cP * cL - sL) + Om ** 2 * r * sL * cL * sP / (V * cG))])
 
 
 class PerturbedStage2Env(Stage2BankAoaEnv):
@@ -136,6 +223,25 @@ class PerturbedStage2Env(Stage2BankAoaEnv):
         # per-episode navigation biases (standard normal, scaled at use: CRN across levels)
         self._nav_bias = rng.standard_normal(8)
         self._rho_phase = rng.uniform(0.0, 2.0 * np.pi)
+        # higher-fidelity profiles from their own stream (the draws above stay CRN)
+        rng_hf = np.random.default_rng(self._pert_seed + 104729)
+        n = _GRID_H.size
+        self._rho_gm = None
+        if p.rho_gm > 0.0:
+            x = _gauss_markov(rng_hf, n, np.exp(-_GRID_DH / p.rho_gm_corr_m))
+            sig = np.interp(_GRID_H / 1e3, RHO_GM_ALT_KM, RHO_GM_SIGMA)
+            self._rho_gm = p.rho_gm * sig * x
+        self._wind = None
+        if p.wind_level > 0.0:
+            phi = np.exp(-_GRID_DH / p.wind_corr_m)
+            amp = 1.0 + 0.5 * rng_hf.standard_normal()
+            jet = WIND_JET_MPS * amp * np.exp(-((_GRID_H - WIND_JET_ALT_M) / WIND_JET_WIDTH_M) ** 2)
+            we = p.wind_level * (jet + WIND_GM_MPS * _gauss_markov(rng_hf, n, phi))
+            wn = p.wind_level * WIND_GM_MPS * _gauss_markov(rng_hf, n, phi)
+            self._wind = (we, wn)
+        self._nav_gm = np.zeros(8)
+        self._nav_t = None
+        self._sdot = self._adot = 0.0
         self._act_on = False                    # heat-rate floor uses the ideal actuator
         obs, info = super().reset(seed=seed, options=options)
         self._base_model = self._model if self._model is not None else ModelFactors()
@@ -145,7 +251,94 @@ class PerturbedStage2Env(Stage2BankAoaEnv):
         self._queue = deque()
         self._imp_done = [False] * len(p.impulses)
         self._act_on = True
+        if self._wind is not None:              # sensed quantities with the air-relative speed
+            self._update_cache()
+            obs = self._obs()
         return obs, info
+
+    def _rho_factor(self, alt):
+        """Altitude-dependent density factor of the disturbance models (1 when none)."""
+        p = self.pert
+        f = 1.0
+        if p.rho_wave_amp:
+            f += p.rho_wave_amp * np.sin(2.0 * np.pi * alt / p.rho_wave_len_m + self._rho_phase)
+        if p.rho_bump_amp:
+            f += p.rho_bump_amp * np.exp(-((alt - p.rho_bump_alt_m) / p.rho_bump_width_m) ** 2)
+        if self._rho_gm is not None:
+            f *= 1.0 + float(np.interp(alt, _GRID_H, self._rho_gm))
+        return max(f, 0.05)
+
+    def _heat_rate_floor(self, z0, h=1.0, t_max=900.0):
+        """As the base floor (open-loop lift-up flight, ideal actuator), flown through the same
+        disturbed atmosphere and winds as the episode, so the floor stays the least peak any
+        guidance can reach under this perturbation."""
+        p = self.pert
+        if not (p.rho_wave_amp or p.rho_bump_amp or self._rho_gm is not None or self._wind is not None):
+            return super()._heat_rate_floor(z0, h, t_max)
+        bm = self._model if self._model is not None else ModelFactors()
+        saved = (self._act_on, getattr(self, "_sig_e", 0.0), getattr(self, "_alp_e", 0.0), self.pert,
+                 self._model, getattr(self, "_base_model", None))
+        try:
+            self.pert = replace(p, bank_acc_dps2=0.0, alpha_acc_dps2=0.0, rate_frac=1.0)
+            self._act_on = True                  # perturbed dynamics, ideal tracking of lift-up
+            self._sig_e, self._alp_e = 0.0, C.ALPHA_MAX * _DEG
+            self._base_model = bm
+            z, t, q_peak, q_prev = np.array(z0, dtype=float), 0.0, 0.0, 0.0
+            while t < t_max:
+                self._model = bm._replace(k_rho=bm.k_rho * self._rho_factor(altitude_m(z[0], z[2])))
+                z = self._rk4(z, h, 0.0, 0.0)
+                t += h
+                q = self._path_point(z)[0] / C.QDOT_MAX
+                if q > q_peak:
+                    q_peak = q
+                elif q < 0.6 * q_peak and q < q_prev:
+                    break
+                if altitude_m(z[0], z[2]) <= self.tgt_alt:
+                    break
+                q_prev = q
+        finally:
+            (self._act_on, self._sig_e, self._alp_e, self.pert, self._model, bmo) = saved
+            if bmo is not None:
+                self._base_model = bmo
+        return float(q_peak)
+
+    def _wind_at(self, z):
+        alt = altitude_m(z[0], z[2])
+        we, wn = self._wind
+        return float(np.interp(alt, _GRID_H, we)), float(np.interp(alt, _GRID_H, wn))
+
+    def _air_speed_nd(self, z):
+        """Air-relative speed (non-dim): equals z[3] without wind."""
+        if self._wind is None or not self._act_on:
+            return z[3]
+        we, wn = self._wind_at(z)
+        sG, cG, sP, cP = np.sin(z[4]), np.cos(z[4]), np.sin(z[5]), np.cos(z[5])
+        va = z[3] * np.array([cG * sP, cG * cP, sG]) - np.array([we, wn, 0.0]) / C.V_SCALE
+        return float(np.linalg.norm(va))
+
+    # -- air-relative path quantities and sensed accelerations (winds) ----------------
+    def _path_point(self, z):
+        if self._wind is None or not self._act_on:
+            return super()._path_point(z)
+        from reentry_rl.physics.aero_wb001 import cl_cd, path_quantities
+        from reentry_rl.physics.atmosphere import atmosphere
+        alt = altitude_m(z[0], z[2])
+        rho = atmosphere(alt)[0]
+        CL, CD = cl_cd(self._alpha_deg(z))
+        m = self._model or ModelFactors()
+        rho, CL, CD, kf = rho * m.k_rho, CL * m.k_CL, CD * m.k_CD, C.KFORCE / m.k_mass
+        Va = self._air_speed_nd(z)
+        return path_quantities(rho, Va * C.V_SCALE, kf * rho * Va ** 2 * CL, kf * rho * Va ** 2 * CD)
+
+    def _update_cache(self):
+        super()._update_cache()
+        if self._wind is None or not self._act_on:
+            return
+        Qdot, qbar, n = self._path_point(self._z)
+        c = self._c
+        Va = self._air_speed_nd(self._z)
+        f = (Va / self._z[3]) ** 2
+        c.update(Qdot=Qdot, qbar=qbar, n=n, L=c["L"] * f, D=c["D"] * f)
 
     # -- navigation errors (observation only) -------------------------------------
     def _obs(self):
@@ -156,7 +349,15 @@ class PerturbedStage2Env(Stage2BankAoaEnv):
         s = NAV_SPEC
         b = self._nav_bias
         w = self._nav_rng.standard_normal(8)
-        e = k * (b + w)                          # bias + white noise, each 1-sigma = spec
+        if self.pert.nav_tau_s > 0.0:            # Gauss-Markov drift instead of white noise
+            if self._nav_t is None:
+                self._nav_gm = w
+            else:
+                ph = np.exp(-max(self.t - self._nav_t, 0.0) / self.pert.nav_tau_s)
+                self._nav_gm = ph * self._nav_gm + np.sqrt(1.0 - ph * ph) * w
+            self._nav_t = self.t
+            w = self._nav_gm
+        e = k * (b + w)                          # bias + noise / drift, each 1-sigma = spec
         z_true, c_true = self._z, self._c
         zn = z_true.copy()
         zn[0] += e[0] * s["pos_m"] / C.R0                         # altitude
@@ -169,8 +370,9 @@ class PerturbedStage2Env(Stage2BankAoaEnv):
             self._z = zn
             self._update_cache()
             c = self._c
-            c["L"] *= 1.0 + e[6] * s["acc_frac"]
-            c["D"] *= 1.0 + e[7] * s["acc_frac"]
+            a = s["acc_frac"] * self.pert.nav_acc_scale
+            c["L"] *= 1.0 + e[6] * a
+            c["D"] *= 1.0 + e[7] * a
             c["n"] = float(np.hypot(c["L"], c["D"]))
             obs = super()._obs()
             self._z_nav, self._c_nav = zn, c                  # what a guidance law can see
@@ -182,11 +384,18 @@ class PerturbedStage2Env(Stage2BankAoaEnv):
     def _deriv(self, z, sdot, adot):
         if not self._act_on:
             return super()._deriv(z, sdot, adot)
-        rf = self.pert.rate_frac
+        p = self.pert
+        rf = p.rate_frac
         sig_max, alp_max = C.SIGMA_DOT_MAX * rf, C.ALPHA_DOT_MAX * rf
         sigma, alpha_rad = z[6], z[7]
-        sdot = float(np.clip(self.track_gain * (self._sig_e - sigma), -sig_max, sig_max))
-        adot = float(np.clip(self.track_gain * (self._alp_e - alpha_rad), -alp_max, alp_max))
+        if p.bank_acc_dps2 > 0.0:
+            sdot = self._sdot                    # held over the substep (acceleration-limited)
+        else:
+            sdot = float(np.clip(self.track_gain * (self._sig_e - sigma), -sig_max, sig_max))
+        if p.alpha_acc_dps2 > 0.0:
+            adot = self._adot
+        else:
+            adot = float(np.clip(self.track_gain * (self._alp_e - alpha_rad), -alp_max, alp_max))
         lo, hi = C.BANK_MIN, C.BANK_MAX
         if (sigma >= hi and sdot > 0.0) or (sigma <= lo and sdot < 0.0):
             sdot = 0.0
@@ -195,8 +404,12 @@ class PerturbedStage2Env(Stage2BankAoaEnv):
         if (alpha_rad >= hi and adot > 0.0) or (alpha_rad <= lo and adot < 0.0):
             adot = 0.0
         alpha_rad = min(max(alpha_rad, lo), hi)
-        d6 = translational_rhs(z[0], z[1], z[2], z[3], z[4], z[5], sigma,
-                               np.rad2deg(alpha_rad), self._model)
+        if self._wind is not None:
+            we, wn = self._wind_at(z)
+            d6 = _rhs_wind(z, sigma, np.rad2deg(alpha_rad), self._model, we, wn)
+        else:
+            d6 = translational_rhs(z[0], z[1], z[2], z[3], z[4], z[5], sigma,
+                                   np.rad2deg(alpha_rad), self._model)
         dz = np.zeros_like(z)
         dz[0:6] = d6
         dz[6] = sdot
@@ -216,15 +429,23 @@ class PerturbedStage2Env(Stage2BankAoaEnv):
             self._alp_e += f * (self._alp_d - self._alp_e)
         else:
             self._sig_e, self._alp_e = self._sig_d, self._alp_d
-        if p.rho_wave_amp or p.rho_bump_amp:
-            alt = altitude_m(z[0], z[2])
-            f = 1.0
-            if p.rho_wave_amp:
-                f += p.rho_wave_amp * np.sin(2.0 * np.pi * alt / p.rho_wave_len_m + self._rho_phase)
-            if p.rho_bump_amp:
-                f += p.rho_bump_amp * np.exp(-((alt - p.rho_bump_alt_m) / p.rho_bump_width_m) ** 2)
+        if p.bank_acc_dps2 > 0.0 or p.alpha_acc_dps2 > 0.0:
+            # second-order attitude response: the tracking-law rate command, rate-limited, is
+            # reached at no more than the acceleration limit (rate held over the substep)
+            rf = p.rate_frac
+            if p.bank_acc_dps2 > 0.0:
+                m = C.SIGMA_DOT_MAX * rf
+                cmd = float(np.clip(self.track_gain * (self._sig_e - z[6]), -m, m))
+                a = p.bank_acc_dps2 * _DEG * h
+                self._sdot = float(np.clip(cmd, self._sdot - a, self._sdot + a))
+            if p.alpha_acc_dps2 > 0.0:
+                m = C.ALPHA_DOT_MAX * rf
+                cmd = float(np.clip(self.track_gain * (self._alp_e - z[7]), -m, m))
+                a = p.alpha_acc_dps2 * _DEG * h
+                self._adot = float(np.clip(cmd, self._adot - a, self._adot + a))
+        if p.rho_wave_amp or p.rho_bump_amp or self._rho_gm is not None:
             bm = self._base_model
-            self._model = bm._replace(k_rho=bm.k_rho * max(f, 0.05))
+            self._model = bm._replace(k_rho=bm.k_rho * self._rho_factor(altitude_m(z[0], z[2])))
         if p.impulses:
             e = self.energy_togo(z)
             for i, (e_imp, dg, dpsi, dv) in enumerate(p.impulses):
@@ -326,7 +547,9 @@ class FnpegRunner(StabilityRunner):
     env's target-mode action, so actuators, perturbations and metrics are identical."""
 
     def __init__(self, env_kwargs, cfg=None):
-        from reentry_rl.guidance.fnpeg import FnpegGuidance
+        from reentry_rl.guidance.fnpeg import FnpegGuidance, FnpegConfig
+        if cfg is None and os.environ.get("FNPEG_CONFIG"):       # tuning hook (JSON overrides)
+            cfg = FnpegConfig(**json.loads(os.environ["FNPEG_CONFIG"]))
         kw = dict(env_kwargs)
         kw.setdefault("obs_version", "v25")
         self.env = PerturbedStage2Env(weights=RewardWeights(), **kw)
@@ -386,6 +609,20 @@ WAVES = (0.1, 0.2, 0.3)
 BUMPS = (-0.3, 0.3)
 # combined "realistic" stack: nav at spec, 1 s delay, 1 s lag, 30 deg/s, +-10 % density waves
 COMBINED = Perturbation(nav_level=1.0, delay_s=1.0, lag_s=1.0, rate_frac=2 / 3, rho_wave_amp=0.1)
+# higher-fidelity stack (final Monte Carlo): navigation errors at spec as bias + Gauss-Markov
+# drift (200 s) with a navigation-grade accelerometer scale error of 300 ppm (the 1 % of
+# NAV_SPEC is a stress level, ~30x a navigation-grade IMU), a slower attitude loop (0.5 s
+# delay, 0.5 s lag, 20 deg/s bank rate, 5 deg/s^2 bank and AoA acceleration), GRAM-like
+# correlated density and the wind model
+HIFI = Perturbation(nav_level=1.0, nav_tau_s=200.0, nav_acc_scale=0.03, delay_s=0.5, lag_s=0.5,
+                    rate_frac=4 / 9, bank_acc_dps2=5.0, alpha_acc_dps2=5.0, rho_gm=1.0, wind_level=1.0)
+# hi-fi margin sweeps (each component alone)
+RHO_GM_LEVELS = (0.5, 1, 2)
+WIND_LEVELS = (0.5, 1, 2)
+ACCS = (20, 10, 5, 2)                                  # bank and AoA acceleration [deg/s^2]
+NAV_GM_LEVELS = (1, 2, 4)
+GAINS_FINE = (0.97, 1.03)
+BIASES_FINE = (-0.5, -0.25, 0.25, 0.5)
 
 
 def margin_conditions():
@@ -402,6 +639,14 @@ def margin_conditions():
             c.append((f"imp_{kn}_{ph}", f"impulse_{kn}", e, replace(P0, impulses=((e, dg, dpsi, dv),))))
     c += [(f"rhowave_{a:g}", "rho_wave", a, replace(P0, rho_wave_amp=a)) for a in WAVES]
     c += [(f"rhobump_{a:+g}", "rho_bump", a, replace(P0, rho_bump_amp=a)) for a in BUMPS]
+    # added 2026-11-03 (hi-fi models, finer actuator-error points)
+    c += [(f"gain_{g:g}", "gain", g, replace(P0, bank_gain=g)) for g in GAINS_FINE]
+    c += [(f"bias_{b:+g}deg", "bias", b, replace(P0, bank_bias_deg=b)) for b in BIASES_FINE]
+    c += [(f"rhogm_x{k:g}", "rho_gm", k, replace(P0, rho_gm=k)) for k in RHO_GM_LEVELS]
+    c += [(f"wind_x{k:g}", "wind", k, replace(P0, wind_level=k)) for k in WIND_LEVELS]
+    c += [(f"acc_{a:g}dps2", "acc", a, replace(P0, bank_acc_dps2=a, alpha_acc_dps2=a)) for a in ACCS]
+    c += [(f"navgm_x{k:g}", "nav_gm", k, replace(P0, nav_level=k, nav_tau_s=200.0)) for k in NAV_GM_LEVELS]
+    c += [("hifi_stack", "hifi", 1.0, HIFI)]
     return c
 
 

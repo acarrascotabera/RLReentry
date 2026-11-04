@@ -149,6 +149,7 @@ class PolicyRunner:
              "J_ratio": info["J_heat"] / self.j_ref,
              "max_Qdot": mQ, "max_qbar": mq, "max_n": mn, "max_ratio": max_ratio,
              "feasible": bool(max_ratio <= 1.0), "feasible_marg": bool(max_ratio <= 1.02),
+             "qdot_lb": float(info.get("qdot_lb", np.nan)),
              "reversals": int((np.diff(np.sign(sig)) != 0).sum()) if sig.size > 1 else 0,
              "bank_rate_rms_dps": float(np.sqrt(np.mean(np.square(sdot)))),
              "alpha_mean_deg": float(alp.mean()), "alpha_std_deg": float(alp.std()),
