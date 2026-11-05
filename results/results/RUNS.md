@@ -1671,6 +1671,56 @@ switch time is identical in every case (lowest switch speed 7065 / 7024 m/s idea
 corrected FNPEG final MC above stands; campaign3 ran without -FinalMC. Then the FNPEG stability
 suite (results/stability_fnpeg, from 18:46).
 
+FNPEG stability suite (campaign3 step 3, 2026-11-04 18:46 to 2026-11-05 03:12, 4.8 h of compute; a
+machine reboot at 21:10 killed it after margins/gain_1.5 and it was resumed at 22:23 from the
+finished files). Same 101-case base set as v26 6M (nominal + 100 cases at 0.1x, same seeds).
+Outputs: results/stability_fnpeg/stability_tables.md and figures/; side by side:
+results/final_mc/margins_tables.md and figures/fig_margins_compare.png. stability_report.py now
+names the law from suite.json and ignores the qdot_lb column that newer runs log themselves (same
+values as floors.csv); re-running it on stability_v26 added the fine margin conditions (acc, gain
+0.97 / 1.03, bias +-0.25 / 0.5, rhogm, wind, navgm) to its tables.
+| condition | FNPEG miss p50 [km] | FNPEG feasible | FNPEG n > limit | FNPEG V_f p1-p99 | RL miss p50 [km] | RL feasible | RL n > limit | RL V_f p1-p99 |
+|---|---|---|---|---|---|---|---|---|
+| baseline | 0.002 | 0.82 | 0.00 | 492-531 | 1.79 | 0.76 | 0.00 | 335-504 |
+| nav white x1 / x2 / x4 | 1.12 / 3.46 / 13.8 | 0.73 / 0.50 / 0.21 | 0.10 / 0.37 / 0.70 | 274-744 / 272-751 / 269-1725 | 3.35 / 6.14 / 13.2 | 0.75 / 0.65 / 0.56 | 0.01 / 0.10 / 0.17 | 336-560 / 299-647 / 295-742 |
+| nav GM drift x1 / x2 / x4 | 1.73 / 4.2 / 8.97 | 0.80 / 0.71 / 0.39 | 0.02 / 0.12 / 0.30 | 267-819 / 266-851 / 266-2023 | 4.21 / 7.72 / 17.1 | 0.74 / 0.69 / 0.43 | 0.02 / 0.06 / 0.17 | 311-494 / 285-691 / 293-768 |
+| delay 4 / 8 s | 0.004 / 0.199 | 0.82 / 0.82 | 0.00 / 0.00 | 497-542 / 513-575 | 6.4 / 10.4 | 0.76 / 0.00 | 0.00 / 0.00 | 341-487 / 309-468 |
+| lag 4 / 8 s | 0.004 / 0.011 | 0.82 / 0.82 | 0.00 / 0.00 | 496-541 / 506-561 | 5.16 / 6.25 | 0.76 / 0.00 | 0.00 / 0.00 | 331-479 / 302-449 |
+| bank-rate limit 5 deg/s | 0.002 | 0.82 | 0.00 | 494-531 | 1.85 | 0.76 | 0.00 | 336-504 |
+| attitude acc. 2 deg/s2 | 0.002 | 0.82 | 0.00 | 497-537 | 1.66 | 0.76 | 0.00 | 333-505 |
+| bank gain 0.85 / 0.97 / 1.03 / 1.15 / 1.3 | 0.0143 / 0.004 / 0.009 / 0.0481 / 62.2 | 0.82 / 0.82 / 0.82 / 0.82 / 0.82 | 0.00 / 0.00 / 0.00 / 0.00 / 0.00 | 486-534 / 491-533 / 494-540 / 463-553 / 304-330 | 80 / 7.64 / 3.18 / 9.62 / 11.8 | 0.77 / 0.76 / 0.75 / 0.74 / 0.09 | 0.00 / 0.00 / 0.00 / 0.02 / 0.85 | 283-328 / 349-495 / 336-439 / 368-620 / 386-687 |
+| bank bias -2 / -0.5 / +0.5 / +2 deg | 0.021 / 0.005 / 0.008 / 0.0279 | 0.79 / 0.82 / 0.82 / 0.80 | 0.00 / 0.00 / 0.00 / 0.00 | 488-523 / 495-534 / 499-541 / 507-565 | 8.47 / 2.74 / 1.71 / 3.6 | 0.74 / 0.75 / 0.76 / 0.75 | 0.00 / 0.00 / 0.00 / 0.00 | 322-484 / 338-500 / 337-507 / 350-472 |
+| kick FPA +1 deg early | 0.003 | 0.15 | 0.00 | 498-554 | 1.85 | 0.76 | 0.00 | 344-518 |
+| kick heading +5 deg mid | 0.115 | 0.82 | 0.00 | 293-933 | 6.03 | 0.76 | 0.00 | 369-499 |
+| kick V -100 m/s late | 0.0634 | 0.82 | 0.00 | 272-533 | 10.4 | 0.76 | 0.00 | 324-482 |
+| density wave 0.1 / 0.2 | 0.0119 / 0.0232 | 0.54 / 0.06 | 0.00 / 0.00 | 412-657 / 272-748 | 1.75 / 4.24 | 0.53 / 0.00 | 0.00 / 1.00 | 359-511 / 359-494 |
+| density GM x1 / x2 | 0.004 / 0.008 | 0.67 / 0.50 | 0.00 / 0.00 | 470-597 / 384-649 | 1.88 / 2.28 | 0.64 / 0.43 | 0.00 / 0.01 | 340-515 / 318-518 |
+| winds x1 / x2 | 0.0223 / 0.0322 | 0.82 / 0.75 | 0.00 / 0.00 | 509-836 / 331-848 | 2.19 / 2.93 | 0.78 / 0.71 | 0.00 / 0.03 | 335-519 / 305-577 |
+| HIFI stack | 1.49 | 0.65 | 0.03 | 317-816 | 3.68 | 0.64 | 0.00 | 294-530 |
+| combined S4 0.1x / 0.25x | 1.59 / 1.53 | 0.50 / 0.42 | 0.04 / 0.04 | 266-774 / 254-783 | 4.7 / 4.89 | 0.32 / 0.34 | 0.01 / 0.08 | 324-501 / 269-561 |
+Strictly feasible = every path ratio <= 1; n > limit = fraction of cases with peak load factor
+above the limit. Reading:
+- Accuracy: FNPEG is ahead in every condition except white navigation noise x4 (13.8 vs 13.2 km)
+  and x8. Corridor grid (121 points): within 5 km 94 % (RL 31 %); footprint grid (169 points):
+  100 % within 5 km and attributable feasible (RL 82 % / 93 %).
+- Actuator margins: FNPEG is insensitive to delay and lag up to 8 s, to the bank-rate limit down to
+  5 deg/s and to the attitude acceleration limit down to 2 deg/s2. It keeps the miss below 50 m
+  for bank-gain errors of 0.85-1.15 and bias errors of +-2 deg (RL: 3-80 km). RL feasibility drops
+  to 0 at 8 s of delay or lag, but only marginally (heat rate 1.02 median, 1.04 max x limit); at
+  gain 1.3 it is severe (n up to 1.44 x limit).
+- Navigation noise is where RL holds the path constraints better: white noise x2 / x4 gives FNPEG
+  n > limit in 37 % / 70 % of cases (n up to 1.94, qbar up to 3.44 x limit at x4), RL 10 % / 17 %
+  (n 1.38, qbar 0.66). An early +1 deg FPA kick makes 86 % of FNPEG cases infeasible, but only
+  marginally (heat rate 1.009 median, 1.038 max).
+- A density wave of 0.2 makes both laws infeasible: FNPEG on heat rate (1.04 median), RL on load
+  factor too (every case, n up to 1.15 x limit).
+- Handover speed: FNPEG has no speed target, so winds (V_f p1-p99 509-836 m/s at x1, baseline
+  492-531), Gauss-Markov navigation drift (267-819) and white noise (274-744) spread it. Those are
+  the components behind its HIFI spread (HIFI stack 317-816). RL stays within 294-530 under the
+  HIFI stack and 335-519 under winds.
+- Combined S4 (all perturbations, dispersions 0.1x / 0.25x): FNPEG 1.59 / 1.53 km, feasible
+  0.50 / 0.42; RL 4.70 / 4.89 km, 0.32 / 0.34.
+
 New margin conditions of v26 6M (101-case base set; median / p90 / max miss km, strictly feasible):
 attitude acceleration 20 / 10 / 5 / 2 deg/s2: 1.68 / 1.72 / 1.74 / 1.67 median, p90 3.1-3.3,
 feasible 0.76 throughout (insensitive); bank gain 0.97: 7.6 / 10.5 / 15.1, gain 1.03: 3.2 / 4.6 /

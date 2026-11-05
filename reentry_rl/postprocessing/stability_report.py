@@ -38,6 +38,7 @@ ROOT = Path(__file__).resolve().parents[2]
 C = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100"]
 INK, INK2, MUTED, GRID, SURFACE = "#0b0b0b", "#52514e", "#8a8984", "#e4e3df", "#fcfcfb"
 _DEG = np.pi / 180.0
+LAW = "v26 6M"            # set from <dir>/suite.json in main()
 _PLAIN = FuncFormatter(lambda v, _pos: f"{v:g}")       # 0.5, 1, 10, 100 rather than 10^x
 
 MARGIN_PANELS = [("nav", "navigation error level", "x reference spec", True),
@@ -132,7 +133,7 @@ def fig_margins(tab, out):
     h0, l0 = axes[0, 0].get_legend_handles_labels()
     h1, l1 = axes[1, 0].get_legend_handles_labels()
     fig.legend(h0 + h1, l0 + l1, loc="lower center", ncol=3, frameon=False, fontsize=8, labelcolor=INK)
-    fig.suptitle("Stability margins of v26 6M: one perturbation class at a time on the nominal mission + 100 "
+    fig.suptitle(f"Stability margins of {LAW}: one perturbation class at a time on the nominal mission + 100 "
                  "cases at 0.1x VISTA dispersions (dashed: unperturbed baseline)",
                  fontsize=11, color=INK, x=0.01, ha="left")
     fig.tight_layout(rect=[0, 0.05, 1, 0.95])
@@ -283,6 +284,11 @@ def grid_floors(d, name):
     return fl
 
 
+def _with_floors(d, name, f):
+    """Grid results with the cached floors (newer runs also log qdot_lb themselves: same values)."""
+    return pd.read_csv(f).drop(columns="qdot_lb", errors="ignore").merge(grid_floors(d, name), on="id")
+
+
 def _attributable(df):
     floor = np.maximum(1.0, df["qdot_lb"])
     return (df["outcome"] == "reached") & (df["max_Qdot"] <= floor + 1e-3) & (df["max_qbar"] <= 1.0) \
@@ -303,7 +309,7 @@ def fig_corridor(d, out):
         ax.grid(False)
         if not f.exists():
             continue
-        df = pd.read_csv(f).merge(grid_floors(d, name), on="id")
+        df = _with_floors(d, name, f)
         xs, ys = np.sort(df[kx].unique()), np.sort(df[ky].unique())
         Z = np.full((len(ys), len(xs)), np.nan)
         for _, r in df.iterrows():
@@ -331,7 +337,7 @@ def fig_corridor(d, out):
         cb.ax.yaxis.set_major_formatter(_PLAIN)
     h, l = axes[0].get_legend_handles_labels()
     fig.legend(h, l, loc="lower center", ncol=3, frameon=False, fontsize=8, labelcolor=INK)
-    fig.suptitle("Entry corridor and target footprint of v26 6M (deterministic grids, nominal model)",
+    fig.suptitle(f"Entry corridor and target footprint of {LAW} (deterministic grids, nominal model)",
                  fontsize=11, color=INK, x=0.01, ha="left")
     fig.savefig(out / "fig_corridor.png", dpi=150, facecolor=SURFACE)
     plt.close(fig)
@@ -374,7 +380,11 @@ def main():
     d = Path(sys.argv[1]) if len(sys.argv) > 1 else ROOT / "results/stability_v26"
     out = d / "figures"
     out.mkdir(parents=True, exist_ok=True)
-    md = ["# Stability analyses of v26 6M", ""]
+    global LAW
+    sj = d / "suite.json"
+    if sj.exists() and json.loads(sj.read_text()).get("guidance") == "fnpeg":
+        LAW = "the FNPEG baseline"
+    md = [f"# Stability analyses of {LAW}", ""]
     tab = load_margins(d)
     if not tab.empty:
         fig_margins(tab, out)
@@ -404,7 +414,7 @@ def main():
     for name in ("corridor", "footprint"):
         f = d / name / f"{name}.csv"
         if f.exists():
-            g = pd.read_csv(f).merge(grid_floors(d, name), on="id")
+            g = _with_floors(d, name, f)
             ok = (g["outcome"] == "reached") & g["feasible"].astype(bool)
             att = _attributable(g)
             md += [f"## {name}", "", f"{len(g)} grid points: reached and strictly feasible {ok.mean() * 100:.0f} %, "
